@@ -125,10 +125,12 @@ import app.gamenative.ui.component.PerformanceQuickMenuState
 import app.gamenative.ui.component.QuickMenu
 import app.gamenative.ui.component.QuickMenuAction
 import app.gamenative.ui.component.SteamInviteState
+import app.gamenative.ui.component.bestRefreshFor
 import app.gamenative.ui.component.dialog.ScConfigManagerDialog
 import app.gamenative.ui.component.dialog.ScOverlayEditorDialog
 import app.gamenative.ui.component.dialog.ScOverlayTarget
 import app.gamenative.ui.component.dialog.SteamControllerBindingEditorDialog
+import app.gamenative.ui.component.isRefreshMultipleOf
 import app.gamenative.ui.component.parseBooleanExtra
 import app.gamenative.ui.component.parsePositiveFpsLimit
 import app.gamenative.ui.data.PerformanceHudConfig
@@ -300,10 +302,13 @@ private fun initialFpsLimiterTarget(container: Container): Int =
     parsePositiveFpsLimit(container.getExtra(FPS_LIMITER_TARGET_EXTRA))
         ?: DEFAULT_FPS_LIMITER_TARGET_HZ
 
-internal fun detectMaxRefreshRateHz(context: Context, attachedView: View?): Int {
-    val display = attachedView?.display
+private fun resolveDisplay(context: Context, attachedView: View?): Display? =
+    attachedView?.display
         ?: context.display
         ?: ContextCompat.getSystemService(context, DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
+
+internal fun detectMaxRefreshRateHz(context: Context, attachedView: View?): Int {
+    val display = resolveDisplay(context, attachedView)
 
     val refreshRate = when {
         display == null -> DEFAULT_FPS_LIMITER_MAX_HZ.toFloat()
@@ -319,6 +324,17 @@ internal fun detectMaxRefreshRateHz(context: Context, attachedView: View?): Int 
         ?.roundToInt()
         ?.coerceAtLeast(5)
         ?: DEFAULT_FPS_LIMITER_MAX_HZ
+}
+
+/** Refresh rates of the display modes that share the current mode's resolution. */
+internal fun detectSupportedRefreshRatesHz(context: Context, attachedView: View?): List<Float> {
+    val display = resolveDisplay(context, attachedView) ?: return emptyList()
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return listOf(display.refreshRate)
+    val current = display.mode
+    return display.supportedModes
+        .filter { it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight }
+        .map { it.refreshRate }
+        .distinct()
 }
 
 private data class XServerViewReleaseBinding(
@@ -698,6 +714,19 @@ fun XServerScreen(
         // keeps frame stats in base units while generated frames tick the ring
         PowerManager.frameSampleStride =
             if (isLsfgAvailable && lsfgMultiplier >= 2) lsfgMultiplier else 1
+        // Panel rate follows what reaches the screen: the cap, or cap * multiplier
+        // while LSFG presents generated frames. Re-applied to the live surface.
+        val presentedFps = if (isLsfgAvailable && lsfgMultiplier >= 2) limit * lsfgMultiplier else limit
+        val supportedHz = detectSupportedRefreshRatesHz(context, ui.xServerView as? View)
+        val refreshHz = bestRefreshFor(presentedFps, supportedHz)
+        (ui.xServerView?.renderer as? VulkanRenderer)?.setRefreshRateLimit(refreshHz)
+        val reason = when {
+            refreshHz <= 0f -> "no display modes, renderer default"
+            presentedFps <= 0 -> "uncapped, max rate"
+            isRefreshMultipleOf(refreshHz, presentedFps) -> "highest multiple of cap"
+            else -> "no multiple of cap, max rate"
+        }
+        Timber.i("Refresh-rate hint %.2f Hz for %d fps (%s), supported=%s", refreshHz, presentedFps, reason, supportedHz)
     }
 
     fun effectiveFpsLimit(): Int =

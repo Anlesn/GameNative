@@ -218,6 +218,8 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     }
 
     public void onSurfaceCreated(Surface surface) {
+        viewSurface = surface;
+        applyFrameRateHint();
         if (!gpuImageChecked) { GPUImage.checkIsSupported(); gpuImageChecked = true; }
         if (initExecutor != null) {
             initExecutor.shutdownNow();
@@ -269,7 +271,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                                         .setVisibility(scanoutGameSC,   true)
                                         .setVisibility(scanoutCursorSC, true)
                                         .apply();
-                                    applyScanoutFrameRateHint();
+                                    applyFrameRateHint();
                                     applyScanoutSwapTransform();
                                     synchronized (lock) {
                                         if (nativeHandle != 0) {
@@ -317,6 +319,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     }
 
     public void onSurfaceDestroyed() {
+        viewSurface = null;
         initComplete = false;
         if (initExecutor != null) {
             initExecutor.shutdownNow();
@@ -770,7 +773,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                         .setVisibility(scanoutGameSC,   true)
                         .setVisibility(scanoutCursorSC, true);
                     scTxn.apply();
-                    applyScanoutFrameRateHint();
+                    applyFrameRateHint();
                     applyScanoutSwapTransform();
                     synchronized (lock) {
                         if (nativeHandle != 0) {
@@ -1015,7 +1018,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     public float getMagnifierZoom() { return magnifierZoom; }
     public void setUnviewableWMClasses(String... classes) { this.unviewableWMClasses = classes; }
     private int fpsLimit = 0;
-    private int refreshRateLimit = 60;
+    // Panel refresh rate voted for the game surfaces, in Hz; 0 = highest supported mode.
+    private float refreshRateLimit = 0f;
+    // The SurfaceView surface the swapchain presents to (compositor path).
+    private Surface viewSurface;
     private int     pendingPresentMode    = 2;
     private int     pendingFilterMode     = 0;
     private boolean pendingSwapRB         = false;
@@ -1031,32 +1037,57 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private volatile boolean effectsRequireCompositor = false;
     public int getFpsLimit() { return fpsLimit; }
     public void setFpsLimit(int limit) {
+        // No frame-rate vote here: the panel rate is owned by setRefreshRateLimit(), and a
+        // second vote with the raw cap would override the chosen multiple on every change.
         this.fpsLimit = limit;
-        if (android.os.Build.VERSION.SDK_INT >= 30 && scanoutGameSC != null) {
-            float targetFps = limit > 0 ? (float)limit
-                : xServerView.getDisplay() != null
-                    ? xServerView.getDisplay().getRefreshRate() : 60f;
-            new android.view.SurfaceControl.Transaction()
-                .setFrameRate(scanoutGameSC, targetFps,
-                    android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
-                .apply();
-        }
     }
-    public int getRefreshRateLimit() { return refreshRateLimit; }
-    public void setRefreshRateLimit(int limit) {
-        this.refreshRateLimit = limit > 0 ? limit : 0;
-        applyScanoutFrameRateHint();
+    public float getRefreshRateLimit() { return refreshRateLimit; }
+    public void setRefreshRateLimit(float limit) {
+        this.refreshRateLimit = limit > 0f && !Float.isInfinite(limit) ? limit : 0f;
+        applyFrameRateHint();
     }
 
-    private void applyScanoutFrameRateHint() {
-        if (android.os.Build.VERSION.SDK_INT < 30 || scanoutGameSC == null) return;
-        float targetFps = refreshRateLimit > 0 ? (float)refreshRateLimit
-            : xServerView.getDisplay() != null
-                ? xServerView.getDisplay().getRefreshRate() : 60f;
-        new android.view.SurfaceControl.Transaction()
-            .setFrameRate(scanoutGameSC, targetFps,
-                android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
-            .apply();
+    // Votes the panel rate on every surface the game reaches the screen through: the
+    // SurfaceView surface (compositor path) and the scanout layer when it exists.
+    // Without a vote the system picks the rate, often 60 Hz.
+    private void applyFrameRateHint() {
+        if (android.os.Build.VERSION.SDK_INT < 30) return;
+        float targetHz = refreshRateLimit > 0f ? refreshRateLimit : maxSupportedRefreshRate();
+        if (targetHz <= 0f) return;
+        // ALWAYS: a game accepts a one-off non-seamless mode switch; the API 31+ default
+        // (ONLY_IF_SEAMLESS) may leave the panel at its current rate.
+        boolean always = android.os.Build.VERSION.SDK_INT >= 31;
+        int compat = android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT;
+        try {
+            if (viewSurface != null && viewSurface.isValid()) {
+                if (always) viewSurface.setFrameRate(targetHz, compat, android.view.Surface.CHANGE_FRAME_RATE_ALWAYS);
+                else viewSurface.setFrameRate(targetHz, compat);
+            }
+            if (scanoutGameSC != null) {
+                android.view.SurfaceControl.Transaction t = new android.view.SurfaceControl.Transaction();
+                if (always) t.setFrameRate(scanoutGameSC, targetHz, compat, android.view.Surface.CHANGE_FRAME_RATE_ALWAYS);
+                else t.setFrameRate(scanoutGameSC, targetHz, compat);
+                t.apply();
+            }
+        } catch (RuntimeException e) {
+            android.util.Log.w("VulkanRenderer", "Frame-rate hint " + targetHz + " Hz failed: " + e);
+        }
+    }
+
+    // Highest refresh rate among the display modes at the current resolution. Not the
+    // current rate: that would pin a panel already running at 60 Hz to 60 Hz.
+    private float maxSupportedRefreshRate() {
+        android.view.Display display = xServerView.getDisplay();
+        if (display == null) return 0f;
+        android.view.Display.Mode current = display.getMode();
+        float max = display.getRefreshRate();
+        for (android.view.Display.Mode mode : display.getSupportedModes()) {
+            if (mode.getPhysicalWidth() == current.getPhysicalWidth()
+                    && mode.getPhysicalHeight() == current.getPhysicalHeight()) {
+                max = Math.max(max, mode.getRefreshRate());
+            }
+        }
+        return max;
     }
     private static class RenderableWindow {
         public final Drawable content; public int rootX, rootY;

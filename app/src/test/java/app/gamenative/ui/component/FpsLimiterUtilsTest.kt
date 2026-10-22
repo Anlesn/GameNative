@@ -1,6 +1,7 @@
 package app.gamenative.ui.component
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -176,5 +177,86 @@ class FpsLimiterUtilsTest {
             fpsLimiterProgress(47, 60),
             0.001f,
         )
+    }
+
+    // ── bestRefreshFor ───────────────────────────────────────────────────────
+
+    private val pad4Modes = listOf(30f, 48f, 50f, 60f, 90f, 120f, 144f)
+
+    @Test
+    fun `pad 4 cap 30 picks highest multiple 120`() {
+        assertEquals(120f, bestRefreshFor(30, pad4Modes), 0f)
+    }
+
+    @Test
+    fun `pad 4 cap 40 picks 120`() {
+        assertEquals(120f, bestRefreshFor(40, pad4Modes), 0f)
+    }
+
+    @Test
+    fun `pad 4 cap 45 picks 90`() {
+        assertEquals(90f, bestRefreshFor(45, pad4Modes), 0f)
+    }
+
+    @Test
+    fun `pad 4 cap 60 picks 120`() {
+        assertEquals(120f, bestRefreshFor(60, pad4Modes), 0f)
+    }
+
+    @Test
+    fun `pad 4 cap 48 picks 144`() {
+        assertEquals(144f, bestRefreshFor(48, pad4Modes), 0f)
+    }
+
+    @Test
+    fun `pad 4 cap 50 picks the only multiple 50`() {
+        assertEquals(50f, bestRefreshFor(50, pad4Modes), 0f)
+    }
+
+    @Test
+    fun `no cap picks max`() {
+        assertEquals(144f, bestRefreshFor(0, pad4Modes), 0f)
+    }
+
+    @Test
+    fun `cap without any supported multiple picks max`() {
+        assertEquals(144f, bestRefreshFor(70, pad4Modes), 0f)
+    }
+
+    @Test
+    fun `cap above max picks max`() {
+        assertEquals(144f, bestRefreshFor(200, pad4Modes), 0f)
+    }
+
+    @Test
+    fun `empty mode list returns 0`() {
+        assertEquals(0f, bestRefreshFor(40, emptyList()), 0f)
+        assertEquals(0f, bestRefreshFor(0, emptyList()), 0f)
+    }
+
+    @Test
+    fun `non-finite and non-positive rates are ignored`() {
+        assertEquals(60f, bestRefreshFor(0, listOf(Float.NaN, -1f, 0f, 60f, Float.POSITIVE_INFINITY)), 0f)
+    }
+
+    @Test
+    fun `ntsc rates count as multiples`() {
+        val modes = listOf(59.94f, 119.88f)
+        assertEquals(119.88f, bestRefreshFor(30, modes), 0f)
+        assertEquals(119.88f, bestRefreshFor(60, modes), 0f)
+        assertEquals(119.88f, bestRefreshFor(40, modes), 0f)
+    }
+
+    @Test
+    fun `ntsc cap 45 has no multiple and falls back to max`() {
+        assertEquals(119.88f, bestRefreshFor(45, listOf(59.94f, 119.88f)), 0f)
+    }
+
+    @Test
+    fun `near-miss rate is not a multiple`() {
+        assertFalse(isRefreshMultipleOf(144f, 30))
+        assertFalse(isRefreshMultipleOf(50f, 48))
+        assertTrue(isRefreshMultipleOf(59.94f, 60))
+        assertFalse(isRefreshMultipleOf(60f, 0))
     }
 }
