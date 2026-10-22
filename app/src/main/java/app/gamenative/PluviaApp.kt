@@ -22,6 +22,7 @@ import app.gamenative.ui.screen.xserver.RadialMenuCoordinator
 import app.gamenative.utils.AppExitRecorder
 import app.gamenative.utils.ContainerMigrator
 import app.gamenative.utils.DebugReportUtils
+import app.gamenative.utils.defaultScreenSizeFor
 import app.gamenative.utils.DeviceInfo
 import app.gamenative.utils.IntentLaunchManager
 import app.gamenative.utils.PlayIntegrity
@@ -349,19 +350,7 @@ class PluviaApp : SplitCompatApplication() {
                         height = displayMetrics.heightPixels
                     }
 
-                    // Calculate aspect ratio (always use landscape orientation for calculation)
-                    val aspectRatio = maxOf(width, height).toFloat() / minOf(width, height).toFloat()
-
-                    // Aspect ratio thresholds:
-                    // 4:3 = 1.33
-                    // 16:10 = 1.6
-                    // 16:9 = 1.77
-
-                    val result = when {
-                        aspectRatio < 1.5f -> Container.DEFAULT_SCREEN_SIZE_4_3  // 4:3 aspect ratio devices
-                        aspectRatio < 1.7f -> Container.DEFAULT_SCREEN_SIZE_16_10  // 16:10 aspect ratio devices
-                        else -> Container.DEFAULT_SCREEN_SIZE_16_9  // 16:9 and wider aspect ratio devices
-                    }
+                    val result = defaultScreenSizeFor(width, height)
                     cachedDefaultScreenSize = result
                     result
                 } else {
