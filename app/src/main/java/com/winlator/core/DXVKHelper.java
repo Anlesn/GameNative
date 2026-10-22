@@ -64,6 +64,36 @@ public class DXVKHelper {
         envVars.put("DXVK_CONFIG", content);
     }
 
+    /**
+     * Merges the DXVK_CONFIG built by {@link #setEnvVars} with the one from the container Environment
+     * instead of letting the user value replace it (which silently drops Max Device Memory / Feature Level).
+     * Options are separated by ';' (the built value also uses newlines and surrounding quotes); on a key
+     * conflict the user's option wins. Returns the user value unchanged when nothing was built.
+     */
+    public static String mergeDxvkConfig(String built, String user) {
+        java.util.LinkedHashMap<String, String> options = new java.util.LinkedHashMap<>();
+        addDxvkOptions(options, built);
+        int builtCount = options.size();
+        addDxvkOptions(options, user);
+        if (builtCount == 0) return user;
+        return String.join(";", options.values());
+    }
+
+    private static void addDxvkOptions(java.util.Map<String, String> options, String config) {
+        if (config == null) return;
+        String data = config.trim();
+        if (data.length() >= 2 && data.startsWith("\"") && data.endsWith("\"")) {
+            data = data.substring(1, data.length() - 1);
+        }
+        for (String part : data.split("[;\\n]")) {
+            String option = part.trim();
+            if (option.isEmpty()) continue;
+            int eq = option.indexOf('=');
+            String key = (eq >= 0 ? option.substring(0, eq) : option).trim();
+            options.put(key, option);
+        }
+    }
+
     public static void setVKD3DEnvVars(Context context, KeyValueSet config, EnvVars envVars) {
         String featureLevel = config.get("vkd3dFeatureLevel", "12_1");
         envVars.put("VKD3D_FEATURE_LEVEL", featureLevel);
