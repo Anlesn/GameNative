@@ -129,6 +129,7 @@ import app.gamenative.ui.component.dialog.ScConfigManagerDialog
 import app.gamenative.ui.component.dialog.ScOverlayEditorDialog
 import app.gamenative.ui.component.dialog.ScOverlayTarget
 import app.gamenative.ui.component.dialog.SteamControllerBindingEditorDialog
+import app.gamenative.ui.component.applyEngineFrameRateCaps
 import app.gamenative.ui.component.parseBooleanExtra
 import app.gamenative.ui.component.parsePositiveFpsLimit
 import app.gamenative.ui.data.PerformanceHudConfig
@@ -4311,8 +4312,11 @@ private fun setupXEnvironment(
         envVars.putAll(container.envVars)
         if (container.isLoadMods && !bootToContainer && !testGraphics) ModDllOverrides.apply(container, envVars)
         immersiveHooks?.windowsVr?.afterContainerEnvironmentMerged(envVars, container)
-        envVars.remove("DXVK_FRAME_RATE")
-        envVars.remove("VKD3D_FRAME_RATE")
+        val gameNativePacingActive = initialFpsLimiterEnabled(container) ||
+            (LsfgQuickMenuHelper.isAvailable(container) && LsfgQuickMenuHelper.readSettings(container).multiplier >= 2)
+        applyEngineFrameRateCaps(envVars, EnvVars(container.envVars), gameNativePacingActive).forEach { name ->
+            Timber.w("Ignoring $name from container Environment: GameNative FPS limiter or LSFG frame generation is active")
+        }
         if (!envVars.has("WINEESYNC")) envVars.put("WINEESYNC", "1")
         if (!envVars.has("_JAVA_OPTIONS")) envVars.put("_JAVA_OPTIONS", "-XX:+IgnoreUnrecognizedVMOptions -XX:+UnlockExperimentalVMOptions -XX:-UseZGC")
         if (debugRun) {
