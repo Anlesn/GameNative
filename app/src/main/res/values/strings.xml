@@ -69,6 +69,8 @@
     <string name="epic_delete_download_message">Delete all downloaded data for this game?</string>
     <string name="epic_uninstall_failed">Uninstall failed: %1$s</string>
     <string name="epic_uninstall_error">Uninstall error: %1$s</string>
+    <string name="epic_device_activation_code">Epic sign-in requested by the game. Approve code %1$s (or enter it at epicgames.com/activate)</string>
+    <string name="epic_device_activation_no_code">Epic sign-in requested by the game. Approve it in the Epic window</string>
     <string name="steam_never">Never</string>
     <string name="steam_continue">Continue</string>
     <string name="header_img_desc">App header image</string>
