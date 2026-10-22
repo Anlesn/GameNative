@@ -122,6 +122,7 @@ public class MITSHMExtension implements Extension {
         if (clippedW > 0 && clippedH > 0
                 && clippedW * clippedH * 5 >= drawable.width * drawable.height * 4
                 && client.connectorClient != null) {
+            app.gamenative.powercontrol.AdpfBooster.onFramePresented();
             long delayNs = com.winlator.xserver.ShmFramePacer.framePresented(drawableId);
             if (delayNs > 0) {
                 client.connectorClient.getConnector().pauseClientReads(client.connectorClient, delayNs);

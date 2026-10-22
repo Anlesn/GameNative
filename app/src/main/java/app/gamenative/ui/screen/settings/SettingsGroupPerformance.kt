@@ -27,5 +27,16 @@ fun SettingsGroupPerformance() {
                 PrefManager.powerControlDefaultEnabled = it
             },
         )
+        var adpfBoostEnabled by rememberSaveable { mutableStateOf(PrefManager.adpfBoostEnabled) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            state = adpfBoostEnabled,
+            title = { Text(stringResource(R.string.settings_performance_adpf_title)) },
+            subtitle = { Text(stringResource(R.string.settings_performance_adpf_subtitle)) },
+            onCheckedChange = {
+                adpfBoostEnabled = it
+                PrefManager.adpfBoostEnabled = it
+            },
+        )
     }
 }

@@ -18,6 +18,7 @@ import app.gamenative.data.EulaInfo
 import app.gamenative.data.GameSource
 import app.gamenative.data.SteamApp
 import app.gamenative.data.filterForCountry
+import app.gamenative.powercontrol.AdpfBooster
 import app.gamenative.powercontrol.autotuning.DeviceGate
 import app.gamenative.enums.AppTheme
 import app.gamenative.ui.enums.AppFilter
@@ -1906,4 +1907,11 @@ object PrefManager {
     var powerControlDefaultEnabled: Boolean
         get() = getPref(POWER_CONTROL_DEFAULT_ENABLED, DeviceGate.isDeviceSupported())
         set(value) { setPref(POWER_CONTROL_DEFAULT_ENABLED, value) }
+
+    private val ADPF_BOOST_ENABLED = booleanPreferencesKey("adpf_boost_enabled")
+    var adpfBoostEnabled: Boolean
+        get() = getPref(ADPF_BOOST_ENABLED, AdpfBooster.isDefaultEnabled())
+        set(value) {
+            setPref(ADPF_BOOST_ENABLED, value)
+        }
 }

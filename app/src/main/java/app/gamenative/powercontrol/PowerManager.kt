@@ -174,6 +174,7 @@ object PowerManager {
         }
 
         appContext.let { PerformanceMetricsCollector.start(it) }
+        AdpfBooster.start(appContext)
 
         isGameStarted = true
     }
@@ -278,6 +279,7 @@ object PowerManager {
         saveProfile()
         AdaptiveFpsCapController.stop()
         PerformanceMetricsCollector.stop()
+        AdpfBooster.stop()
         stopPowerControl()
         isGameStarted = false
         fpsCapApplier = null

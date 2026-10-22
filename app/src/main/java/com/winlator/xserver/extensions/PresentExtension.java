@@ -316,6 +316,7 @@ public class PresentExtension implements Extension {
         final VulkanRenderer vr = (xr instanceof VulkanRenderer) ? (VulkanRenderer) xr : null;
         final ASurfaceRenderer asr = (xr instanceof ASurfaceRenderer) ? (ASurfaceRenderer) xr : null;
         final int targetFps = this.frameRateLimit;
+        app.gamenative.powercontrol.AdpfBooster.onFramePresented();
 
         long ust = System.nanoTime() / 1000;
         long msc = ust / (targetFps > 0 ? (1_000_000L / targetFps) : (1_000_000L / 60));
