@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    What Android's GameManager (12+) and the OEM game services keyed to it may do to a session.
+    Without this file the OS offers only the standard and custom modes. Performance and battery
+    modes are opted into; downscaling and an OS-side fps override are refused, because the X
+    server already owns the output size and the in-app limiter owns the frame cap.
+-->
+<game-mode-config xmlns:android="http://schemas.android.com/apk/res/android"
+    android:supportsPerformanceGameMode="true"
+    android:supportsBatteryGameMode="true"
+    android:allowGameDownscaling="false"
+    android:allowGameFpsOverride="false" />
