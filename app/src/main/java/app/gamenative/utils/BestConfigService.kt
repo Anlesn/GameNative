@@ -8,6 +8,7 @@ import app.gamenative.BuildConfig
 import app.gamenative.MainActivity
 import app.gamenative.PrefManager
 import app.gamenative.R
+import app.gamenative.data.GameSource
 import com.winlator.box86_64.Box86_64PresetManager
 import com.winlator.container.Container
 import com.winlator.contents.ContentProfile
@@ -33,6 +34,12 @@ import timber.log.Timber
  */
 object BestConfigService {
     private const val API_BASE_URL = "https://api.gamenative.app/api/best-config"
+
+    const val SOURCE_SERVER = "server"
+
+    /** Response built from the local device profile ([DeviceProfileService]), not from the server. */
+    const val SOURCE_LOCAL = "local_profile"
+
     private val httpClient = Net.http
 
     // In-memory cache keyed by "${gameName}_${gpuName}"
@@ -47,6 +54,7 @@ object BestConfigService {
         val matchedGpu: String,
         val matchedDeviceId: Int,
         val matchedStore: String,
+        val source: String = SOURCE_SERVER,
     )
 
     /**
@@ -78,13 +86,23 @@ object BestConfigService {
     /**
      * Fetches best configuration for a game.
      * Returns cached response if available, otherwise makes API call.
+     * For a Steam game with an entry in the local device profile, returns that entry instead.
      */
     suspend fun fetchBestConfig(
         context: Context,
         gameName: String,
         gpuName: String,
         gameStore: String,
+        steamAppId: Int? = null,
     ): BestConfigResponse? = withContext(Dispatchers.IO) {
+        // A local device profile entry beats the server and needs no network.
+        if (steamAppId != null && gameStore.equals(GameSource.STEAM.name, ignoreCase = true)) {
+            DeviceProfileService.localBestConfig(context, steamAppId, gpuName)?.let {
+                Timber.tag("BestConfigService").d("Using local device profile for appId $steamAppId")
+                return@withContext it
+            }
+        }
+
         val cacheKey = "${gameName}_${gpuName}_${gameStore}"
 
         // Check cache first

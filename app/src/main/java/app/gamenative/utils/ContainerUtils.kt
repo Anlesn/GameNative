@@ -28,6 +28,7 @@ import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonObject
 import org.json.JSONArray
 import org.json.JSONObject
 import timber.log.Timber
@@ -855,6 +856,8 @@ object ContainerUtils {
 
         // Check for cached best config (store-backed games only, only if no custom config provided)
         var bestConfigMap: Map<String, Any?>? = null
+        // Set when bestConfigMap came from the local device profile game entry
+        var localGameConfig: JsonObject? = null
 
         if (supportsKnownConfigAutoApply(gameSource) && customConfig == null && PrefManager.autoApplyKnownConfig) {
             try {
@@ -871,6 +874,7 @@ object ContainerUtils {
                                 gameName = gameName,
                                 gpuName = gpuName,
                                 gameStore = gameSource.name,
+                                steamAppId = if (gameSource == GameSource.STEAM) extractGameIdFromContainerId(appId) else null,
                             )
                             if (bestConfig != null && bestConfig.matchType != "no_match") {
                                 Timber.i("Applying best config for $gameName (matchType: ${bestConfig.matchType})")
@@ -884,6 +888,9 @@ object ContainerUtils {
                                 )
                                 if (parsedConfig != null && parsedConfig.isNotEmpty()) {
                                     bestConfigMap = parsedConfig
+                                    if (bestConfig.source == BestConfigService.SOURCE_LOCAL) {
+                                        localGameConfig = bestConfig.bestConfig
+                                    }
                                 }
                             }
                         } catch (e: Exception) {
@@ -980,6 +987,17 @@ object ContainerUtils {
             containerData
         }
 
+        // Local device profile: a game entry already came through fetchBestConfig above; otherwise the
+        // device defaults go over the server config. A custom (override) config is an explicit user choice.
+        if (customConfig == null) {
+            val localGame = localGameConfig
+            containerData = if (localGame != null) {
+                DeviceProfileService.applyLocalFields(container, containerData, localGame, DeviceProfileService.SOURCE_GAME, appId)
+            } else {
+                DeviceProfileService.applyDeviceDefaults(context, container, containerData, appId)
+            }
+        }
+
         if (BuildConfig.XR_BUILD && MainActivity.isMetaQuest()) {
             val kvs = KeyValueSet(containerData.graphicsDriverConfig)
             kvs.put("adrenotoolsTurnip", "0")
@@ -1014,7 +1032,8 @@ object ContainerUtils {
 
         // No custom config, so determine the DX wrapper synchronously (only for Steam games)
         // For GOG and Custom Games, use the default DX wrapper from preferences
-        if (gameSource == GameSource.STEAM) {
+        // A local device profile game entry sets the DX wrapper (and exe) itself, e.g. DXVK for Control_DX11.exe
+        if (gameSource == GameSource.STEAM && localGameConfig == null) {
             runBlocking {
                 try {
                     Timber.i("Fetching DirectX version synchronously for app $appId")

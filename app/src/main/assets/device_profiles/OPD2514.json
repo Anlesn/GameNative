@@ -1,0 +1,33 @@
+{
+  "model": "OPD2514",
+  "gpu": "adreno8EliteGen5",
+  "defaults": {
+    "containerVariant": "bionic",
+    "wineVersion": "proton-11.0-1-arm64ec-1",
+    "graphicsDriver": "Wrapper",
+    "graphicsDriverVersion": "qcom-849",
+    "graphicsDriverConfig": "version=qcom-849,adrenotoolsTurnip=1",
+    "dxwrapper": "dxvk",
+    "dxwrapperConfig": "version=1.11.1-sarek",
+    "emulator": "FEXCore",
+    "fexcorePreset": "INTERMEDIATE",
+    "envVars": "WRAPPER_USE_BCN_CACHE=1",
+    "screenSize": "1920x1080",
+    "rendererPresentMode": "fifo",
+    "fpsLimiterEnabled": false
+  },
+  "games": {
+    "1313140": {},
+    "870780": {
+      "executablePath": "Control_DX11.exe",
+      "graphicsDriverVersion": "Turnip Adreno Driver T26 (@Mr_Purple_666)",
+      "graphicsDriverConfig": "version=Turnip Adreno Driver T26 (@Mr_Purple_666)",
+      "dxwrapperConfig": "version=2.4.1",
+      "fexcorePreset": "COMPATIBILITY",
+      "envVars": "DXVK_CONFIG=dxvk.enableGraphicsPipelineLibrary=False",
+      "rendererPresentMode": "mailbox",
+      "fpsLimiterEnabled": true,
+      "fpsLimiterTarget": 30
+    }
+  }
+}
