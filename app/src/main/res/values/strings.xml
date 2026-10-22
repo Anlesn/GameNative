@@ -217,6 +217,7 @@
     <string name="opengl">OpenGL</string>
     <string name="physx">PhysX</string>
     <string name="dxvk_version">DXVK Version</string>
+    <string name="dxvk_version_vkd3d_hint">VKD3D needs DXVK 2.1 or newer, so older versions (e.g. 1.11.1-sarek) are hidden. To use one, set DX Wrapper to DXVK and pick the version again.</string>
     <string name="run">Run</string>
     <string name="edit">Edit</string>
     <string name="remove">Remove</string>
