@@ -105,7 +105,7 @@ public class WineRequestComponent extends EnvironmentComponent {
             return;
         }
 
-        if (url.startsWith(EpicOAuthActivity.EPIC_AUTH_URL_PREFIX)) {
+        if (isEpicAccountUrl(url)) {
             Log.i(TAG, "OPEN_URL " + loggableUrl + " -> EpicOAuthActivity");
             startEpicWebView(context, url);
             return;
@@ -140,6 +140,14 @@ public class WineRequestComponent extends EnvironmentComponent {
                 ? appContext.getString(R.string.epic_device_activation_code, userCode)
                 : appContext.getString(R.string.epic_device_activation_no_code);
         new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(appContext, message, Toast.LENGTH_LONG).show());
+    }
+
+    private static boolean isEpicAccountUrl(String url) {
+        Uri uri = Uri.parse(url);
+        String host = uri.getHost();
+        String path = uri.getPath();
+        return host != null && (host.equals("epicgames.com") || host.equals("www.epicgames.com"))
+            && path != null && path.startsWith("/id/");
     }
 
 }
