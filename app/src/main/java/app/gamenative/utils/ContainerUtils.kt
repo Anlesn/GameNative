@@ -1466,9 +1466,7 @@ object ContainerUtils {
             "vc_redist",
             "dxsetup",
             "directx",
-            "crashhandler",
-            "crashreporter",
-        )
+        ) + GameHelperProcesses.CRASH_REPORTER_PREFIXES
 
         if (strongPrefixes.any { baseName.startsWith(it) }) {
             return true
@@ -1483,9 +1481,7 @@ object ContainerUtils {
             "vcredist",
             "directx",
             "dxsetup",
-            "crashhandler",
-            "crashreporter",
-        )
+        ) + GameHelperProcesses.CRASH_REPORTER_PREFIXES
         val tokens = baseName.split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }
         return tokens.any { it in denylistTokens }
     }

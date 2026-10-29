@@ -364,13 +364,6 @@ private val CORE_WINE_PROCESSES = setOf(
     "svchost",
 )
 
-private fun normalizeProcessName(name: String): String {
-    val trimmed = name.trim().trim('"')
-    val base = trimmed.substringAfterLast('/').substringAfterLast('\\')
-    val lower = base.lowercase(Locale.getDefault())
-    return if (lower.endsWith(".exe")) lower.removeSuffix(".exe") else lower
-}
-
 internal fun parseScreenSize(screenSize: String): Pair<Int, Int>? {
     val parts = screenSize.lowercase(Locale.getDefault()).split("x")
     if (parts.size != 2) return null
@@ -919,7 +912,8 @@ fun XServerScreen(
     }
 
     fun startExitWatchForUnmappedGameWindow(window: Window) {
-        val winHandler = ui.xServerView?.getxServer()?.winHandler ?: return
+        val xServer = ui.xServerView?.getxServer() ?: return
+        val winHandler = xServer.winHandler ?: return
         if (ui.exitWatchJob?.isActive == true) return
         val rockstarExecutable = realSteamRockstarDirectory?.let(RockstarHelperDeployment::gameExecutable)
         val targetExecutable = extractExecutableBasename(
@@ -960,7 +954,8 @@ fun XServerScreen(
             winHandler.setOnGetProcessInfoListener(listener)
             try {
                 val startTime = System.currentTimeMillis()
-                while (System.currentTimeMillis() - startTime < EXIT_PROCESS_TIMEOUT_MS) {
+                var latestNames: List<String>? = null
+                while (true) {
                     val deferred = CompletableDeferred<List<ProcessInfo>?>()
                     synchronized(lock) {
                         pendingSnapshot = deferred
@@ -972,9 +967,42 @@ fun XServerScreen(
                     if (snapshot == null) {
                         Timber.w("Exit watch: no process snapshot within ${EXIT_PROCESS_RESPONSE_TIMEOUT_MS}ms")
                     } else {
+                        latestNames = snapshot.map { it.name }
                         val nonEssential = snapshot.map { normalizeProcessName(it.name) }.filter { it !in allowlist }
                         Timber.i("Exit watch: ${snapshot.size} processes, non-essential=$nonEssential")
-                        if (nonEssential.isEmpty()) {
+                    }
+                    val elapsedMs = System.currentTimeMillis() - startTime
+                    val appWindowVisible = elapsedMs >= EXIT_PROCESS_TIMEOUT_MS && hasMappedApplicationWindow(xServer)
+                    val decision = latestNames
+                        ?.let {
+                            decideExitWatch(
+                                it,
+                                targetExecutable,
+                                allowlist,
+                                elapsedMs,
+                                EXIT_PROCESS_TIMEOUT_MS,
+                                appWindowVisible,
+                            )
+                        }
+                        ?: if (elapsedMs < EXIT_PROCESS_TIMEOUT_MS) {
+                            ExitWatchDecision.Continue
+                        } else {
+                            ExitWatchDecision.GiveUp(emptyList())
+                        }
+                    when (decision) {
+                        ExitWatchDecision.Continue -> delay(EXIT_PROCESS_POLL_INTERVAL_MS)
+                        is ExitWatchDecision.GiveUp -> {
+                            Timber.w(
+                                "Exit watch for $targetExecutable ended without exiting" +
+                                    " after ${elapsedMs}ms, remaining=${decision.remaining}",
+                            )
+                            return@launch
+                        }
+                        is ExitWatchDecision.Exit -> {
+                            Timber.i(
+                                "Exit watch for $targetExecutable: exiting, reason=${decision.reason}" +
+                                    " after ${elapsedMs}ms, remaining=${decision.remaining}",
+                            )
                             withContext(Dispatchers.Main) {
                                 exit(
                                     winHandler,
@@ -984,15 +1012,13 @@ fun XServerScreen(
                                     appId,
                                     onExit,
                                     navigateBack,
-                                    "processes_exited",
+                                    decision.reason,
                                 )
                             }
                             return@launch
                         }
                     }
-                    delay(EXIT_PROCESS_POLL_INTERVAL_MS)
                 }
-                Timber.w("Exit watch for $targetExecutable ended without exiting")
             } finally {
                 winHandler.setOnGetProcessInfoListener(previousListener)
                 synchronized(lock) {
