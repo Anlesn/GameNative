@@ -192,6 +192,16 @@ object PrefManager {
             setPref(SCREEN_SIZE, value)
         }
 
+    // screen_size is written only by ContainerUtils.setDefaultContainerData (Settings > default container config)
+    val hasSavedContainerDefaults: Boolean
+        get() = runBlocking {
+            try {
+                dataStore.data.first().contains(SCREEN_SIZE)
+            } catch (e: IOException) {
+                false
+            }
+        }
+
     private val ENV_VARS = stringPreferencesKey("env_vars")
     var envVars: String
         get() = getPref(ENV_VARS, Container.DEFAULT_ENV_VARS)

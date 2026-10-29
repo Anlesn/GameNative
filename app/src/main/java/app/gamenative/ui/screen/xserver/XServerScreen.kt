@@ -4308,7 +4308,13 @@ private fun setupXEnvironment(
         // Set steam type for selecting appropriate box64rc
         guestProgramLauncherComponent.setSteamType(container.getSteamType())
 
+        val builtDxvkConfig = envVars.get("DXVK_CONFIG")
         envVars.putAll(container.envVars)
+        // Merge, not replace: a DXVK_CONFIG from the Environment tab used to drop Max Device Memory / Feature Level
+        val userDxvkConfig = EnvVars(container.envVars).get("DXVK_CONFIG")
+        if (builtDxvkConfig.isNotEmpty() && userDxvkConfig.isNotEmpty()) {
+            envVars.put("DXVK_CONFIG", DXVKHelper.mergeDxvkConfig(builtDxvkConfig, userDxvkConfig))
+        }
         if (container.isLoadMods && !bootToContainer && !testGraphics) ModDllOverrides.apply(container, envVars)
         immersiveHooks?.windowsVr?.afterContainerEnvironmentMerged(envVars, container)
         envVars.remove("DXVK_FRAME_RATE")

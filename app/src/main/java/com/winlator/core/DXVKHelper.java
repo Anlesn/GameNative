@@ -23,31 +23,14 @@ public class DXVKHelper {
         File rootDir = ImageFs.find(context).getRootDir();
         File dxvkConfigFile = new File(imageFs.config_path+"/dxvk.conf");
 
-        String content = "\"";
-        String maxDeviceMemory = config.get("maxDeviceMemory");
-        if (!maxDeviceMemory.isEmpty() && !maxDeviceMemory.equals("0")) {
-            content += "dxgi.maxDeviceMemory = "+maxDeviceMemory+"\n";
-            content += "dxgi.maxSharedMemory = "+maxDeviceMemory+"\n";
-        }
-
         String maxFeatureLevel = config.get("maxFeatureLevel");
         if (!maxFeatureLevel.isEmpty() && !maxFeatureLevel.equals("0")) {
-            content += "d3d11.maxFeatureLevel = "+maxFeatureLevel+"\n";
             envVars.put("DXVK_FEATURE_LEVEL", maxFeatureLevel);
         }
-
 
         String framerate = config.get("framerate");
         if (!framerate.isEmpty() && !framerate.equals("0")) {
             envVars.put("DXVK_FRAME_RATE", framerate);
-        }
-        String customDevice = config.get("customDevice");
-        if (customDevice.contains(":")) {
-            String[] parts = customDevice.split(":");
-            content = (((((content + "dxgi.customDeviceId = " + parts[0] + "\n") + "dxgi.customVendorId = " + parts[1] + "\n") + "d3d9.customDeviceId = " + parts[0] + "\n") + "d3d9.customVendorId = " + parts[1] + "\n") + "dxgi.customDeviceDesc = \"" + parts[2] + "\"\n") + "d3d9.customDeviceDesc = \"" + parts[2] + "\"\n";
-        }
-        if (config.getBoolean("constantBufferRangeCheck")) {
-            content = content + "d3d11.constantBufferRangeCheck = \"True\"\n";
         }
 
         String async = config.get("async");
@@ -57,11 +40,73 @@ public class DXVKHelper {
         String asyncCache = config.get("asyncCache");
         if (!asyncCache.isEmpty() && !asyncCache.equals("0"))
             envVars.put("DXVK_GPLASYNCCACHE", "1");
-        content = content + '\"';
-
 
         envVars.put("DXVK_CONFIG_FILE", rootDir + ImageFs.CONFIG_PATH+"/dxvk.conf");
-        envVars.put("DXVK_CONFIG", content);
+        String dxvkConfig = buildDxvkConfig(config);
+        if (!dxvkConfig.isEmpty()) envVars.put("DXVK_CONFIG", dxvkConfig);
+    }
+
+    /**
+     * Builds the DXVK_CONFIG value from the container's DXVK settings: "key = value" options joined by "; ",
+     * which is how DXVK splits that variable. Empty when no option is set (the variable is then left unset).
+     */
+    public static String buildDxvkConfig(KeyValueSet config) {
+        java.util.List<String> options = new java.util.ArrayList<>();
+        String maxDeviceMemory = config.get("maxDeviceMemory");
+        if (!maxDeviceMemory.isEmpty() && !maxDeviceMemory.equals("0")) {
+            options.add("dxgi.maxDeviceMemory = " + maxDeviceMemory);
+            options.add("dxgi.maxSharedMemory = " + maxDeviceMemory);
+        }
+
+        String maxFeatureLevel = config.get("maxFeatureLevel");
+        if (!maxFeatureLevel.isEmpty() && !maxFeatureLevel.equals("0")) {
+            options.add("d3d11.maxFeatureLevel = " + maxFeatureLevel);
+        }
+
+        String customDevice = config.get("customDevice");
+        if (customDevice.contains(":")) {
+            String[] parts = customDevice.split(":");
+            options.add("dxgi.customDeviceId = " + parts[0]);
+            options.add("dxgi.customVendorId = " + parts[1]);
+            options.add("d3d9.customDeviceId = " + parts[0]);
+            options.add("d3d9.customVendorId = " + parts[1]);
+            options.add("dxgi.customDeviceDesc = \"" + parts[2] + "\"");
+            options.add("d3d9.customDeviceDesc = \"" + parts[2] + "\"");
+        }
+        if (config.getBoolean("constantBufferRangeCheck")) {
+            options.add("d3d11.constantBufferRangeCheck = \"True\"");
+        }
+        return String.join("; ", options);
+    }
+
+    /**
+     * Merges the DXVK_CONFIG built by {@link #setEnvVars} with the one from the container Environment
+     * instead of letting the user value replace it (which silently drops Max Device Memory / Feature Level).
+     * Options are separated by ';' (older built values used newlines and surrounding quotes, still accepted);
+     * on a key conflict the user's option wins. Returns the user value unchanged when nothing was built.
+     */
+    public static String mergeDxvkConfig(String built, String user) {
+        java.util.LinkedHashMap<String, String> options = new java.util.LinkedHashMap<>();
+        addDxvkOptions(options, built);
+        int builtCount = options.size();
+        addDxvkOptions(options, user);
+        if (builtCount == 0) return user;
+        return String.join("; ", options.values());
+    }
+
+    private static void addDxvkOptions(java.util.Map<String, String> options, String config) {
+        if (config == null) return;
+        String data = config.trim();
+        if (data.length() >= 2 && data.startsWith("\"") && data.endsWith("\"")) {
+            data = data.substring(1, data.length() - 1);
+        }
+        for (String part : data.split("[;\\n]")) {
+            String option = part.trim();
+            if (option.isEmpty()) continue;
+            int eq = option.indexOf('=');
+            String key = (eq >= 0 ? option.substring(0, eq) : option).trim();
+            options.put(key, option);
+        }
     }
 
     public static void setVKD3DEnvVars(Context context, KeyValueSet config, EnvVars envVars) {
