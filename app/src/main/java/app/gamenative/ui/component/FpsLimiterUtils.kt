@@ -2,6 +2,8 @@ package app.gamenative.ui.component
 
 import com.winlator.core.envvars.EnvVars
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 internal fun parsePositiveFpsLimit(value: String): Int? = value.toIntOrNull()?.takeIf { it > 0 }
 
@@ -76,4 +78,34 @@ internal fun applyEngineFrameRateCaps(
         if (gameNativePacingActive) dropped.add(name) else envVars.put(name, userValue)
     }
     return dropped
+}
+
+// Relative slack when matching a panel rate to a multiple of the FPS cap, so NTSC-style
+// 59.94 / 119.88 Hz modes (1000/1001, 0.1 % off) still count as exact multiples.
+private const val REFRESH_MULTIPLE_TOLERANCE = 0.005f
+
+/** True when [refreshHz] is an integer multiple (1x or more) of [capFps]. */
+internal fun isRefreshMultipleOf(refreshHz: Float, capFps: Int): Boolean {
+    if (capFps <= 0 || !refreshHz.isFinite() || refreshHz <= 0f) return false
+    val ratio = refreshHz / capFps
+    val multiple = ratio.roundToInt()
+    return multiple >= 1 && abs(ratio - multiple) <= multiple * REFRESH_MULTIPLE_TOLERANCE
+}
+
+/**
+ * Picks the panel refresh rate to request for an FPS [cap].
+ *
+ * Returns the highest supported rate that is an integer multiple of [cap], so every capped
+ * frame spans the same number of vsync periods (40 → 120, 45 → 90). The highest multiple,
+ * not the lowest, because the limiter releases frames on the first vsync after a wall-clock
+ * target: a frame that misses its slot waits one more panel period, and a shorter period
+ * means a smaller hitch (30 → 120 rather than 60).
+ * No cap (0) or no supported multiple → the highest supported rate.
+ * Returns 0 when [supportedHz] holds no usable rate.
+ */
+internal fun bestRefreshFor(cap: Int, supportedHz: List<Float>): Float {
+    val rates = supportedHz.filter { it.isFinite() && it > 0f }
+    val max = rates.maxOrNull() ?: return 0f
+    if (cap <= 0) return max
+    return rates.filter { isRefreshMultipleOf(it, cap) }.maxOrNull() ?: max
 }
