@@ -3,6 +3,7 @@ package com.winlator.core.envvars
 import com.winlator.container.Container
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -115,5 +116,12 @@ class EnvVarsTest {
                 assertTrue("$name default '$option' is not offered by the picker", option in info.possibleValues)
             }
         }
+    }
+
+    @Test
+    fun defaultsDoNotOverrideGraphicsPresentMode() {
+        // container Environment is merged after the Graphics driver config, so a default here would
+        // silently replace the Present Mode chosen in the Graphics tab
+        assertFalse(EnvVars(Container.DEFAULT_ENV_VARS).has("MESA_VK_WSI_PRESENT_MODE"))
     }
 }

@@ -1,5 +1,6 @@
 package app.gamenative.ui.component
 
+import com.winlator.core.envvars.EnvVars
 import java.util.Locale
 
 internal fun parsePositiveFpsLimit(value: String): Int? = value.toIntOrNull()?.takeIf { it > 0 }
@@ -49,4 +50,30 @@ internal fun previousFpsLimiterValue(currentValue: Int, maxFps: Int): Int {
     val steps = fpsLimiterSteps(maxFps)
     val currentIndex = fpsLimiterCurrentIndex(steps, currentValue)
     return steps[(currentIndex - 1).coerceAtLeast(0)]
+}
+
+/** Engine-side frame-rate caps that GameNative's own limiter replaces at launch. */
+internal val ENGINE_FRAME_RATE_CAP_VARS = listOf("DXVK_FRAME_RATE", "VKD3D_FRAME_RATE")
+
+/**
+ * Removes DXVK/VKD3D frame-rate caps from the launch environment, keeping only caps the user set in
+ * the container Environment while GameNative does not pace the game itself (FPS limiter off, no LSFG
+ * frame generation). Old defaults and best-config left `DXVK_FRAME_RATE=60` in many containers; such
+ * a hidden cap fights the in-game limiter, which cannot lift it at runtime.
+ *
+ * @return names of user-set caps that were dropped because GameNative pacing is active.
+ */
+internal fun applyEngineFrameRateCaps(
+    envVars: EnvVars,
+    containerEnvVars: EnvVars,
+    gameNativePacingActive: Boolean,
+): List<String> {
+    val dropped = mutableListOf<String>()
+    for (name in ENGINE_FRAME_RATE_CAP_VARS) {
+        envVars.remove(name)
+        val userValue = containerEnvVars.get(name)
+        if (userValue.isEmpty()) continue
+        if (gameNativePacingActive) dropped.add(name) else envVars.put(name, userValue)
+    }
+    return dropped
 }

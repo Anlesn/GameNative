@@ -1,6 +1,8 @@
 package app.gamenative.ui.component
 
+import com.winlator.core.envvars.EnvVars
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -176,5 +178,52 @@ class FpsLimiterUtilsTest {
             fpsLimiterProgress(47, 60),
             0.001f,
         )
+    }
+
+    // ── applyEngineFrameRateCaps ─────────────────────────────────────────────
+
+    @Test
+    fun `user frame rate caps are kept when GameNative pacing is off`() {
+        val container = EnvVars("DXVK_FRAME_RATE=30 VKD3D_FRAME_RATE=40")
+        val env = EnvVars().apply { putAll(container) }
+
+        val dropped = applyEngineFrameRateCaps(env, container, gameNativePacingActive = false)
+
+        assertEquals("30", env.get("DXVK_FRAME_RATE"))
+        assertEquals("40", env.get("VKD3D_FRAME_RATE"))
+        assertTrue(dropped.isEmpty())
+    }
+
+    @Test
+    fun `user frame rate caps are dropped and reported when GameNative pacing is on`() {
+        val container = EnvVars("DXVK_FRAME_RATE=60")
+        val env = EnvVars().apply { putAll(container) }
+
+        val dropped = applyEngineFrameRateCaps(env, container, gameNativePacingActive = true)
+
+        assertFalse(env.has("DXVK_FRAME_RATE"))
+        assertEquals(listOf("DXVK_FRAME_RATE"), dropped)
+    }
+
+    @Test
+    fun `caps not set in container Environment are always removed`() {
+        // e.g. DXVK_FRAME_RATE written from dxwrapperConfig framerate before the merge
+        val env = EnvVars("DXVK_FRAME_RATE=60 WINEESYNC=1")
+
+        val dropped = applyEngineFrameRateCaps(env, EnvVars(), gameNativePacingActive = false)
+
+        assertFalse(env.has("DXVK_FRAME_RATE"))
+        assertEquals("1", env.get("WINEESYNC"))
+        assertTrue(dropped.isEmpty())
+    }
+
+    @Test
+    fun `container Environment value wins over a cap written before the merge`() {
+        val container = EnvVars("DXVK_FRAME_RATE=30")
+        val env = EnvVars("DXVK_FRAME_RATE=60")
+
+        applyEngineFrameRateCaps(env, container, gameNativePacingActive = false)
+
+        assertEquals("30", env.get("DXVK_FRAME_RATE"))
     }
 }

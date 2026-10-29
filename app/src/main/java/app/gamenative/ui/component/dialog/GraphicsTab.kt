@@ -460,6 +460,11 @@ private fun DxWrapperSection(state: ContainerConfigState) {
         SettingsListDropdown(
             colors = settingsTileColors(),
             title = { Text(text = stringResource(R.string.dxvk_version)) },
+            subtitle = if (context.hidesPreVkd3dVersions) {
+                { Text(text = stringResource(R.string.dxvk_version_vkd3d_hint)) }
+            } else {
+                null
+            },
             value = state.dxvkVersionIndex.value.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
             items = items,
             itemMuted = itemMuted,

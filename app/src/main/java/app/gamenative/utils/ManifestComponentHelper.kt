@@ -213,6 +213,8 @@ object ManifestComponentHelper {
         val labels: List<String>,
         val ids: List<String>,
         val muted: List<Boolean>,
+        /** True when VKD3D is selected and DXVK versions below 2.1 were removed from [labels]. */
+        val hidesPreVkd3dVersions: Boolean = false,
     )
 
     /**
@@ -281,7 +283,7 @@ object ManifestComponentHelper {
         }
 
         // Always return DXVK options regardless of wrapper selection (allows DXVK config even when VKD3D is selected)
-        return DxvkContext(isVortekLike, finalLabels, finalIds, finalMuted)
+        return DxvkContext(isVortekLike, finalLabels, finalIds, finalMuted, finalIds.size < ids.size)
     }
 
     fun versionExists(version: String, available: List<String>): Boolean {
