@@ -109,3 +109,27 @@ internal fun bestRefreshFor(cap: Int, supportedHz: List<Float>): Float {
     if (cap <= 0) return max
     return rates.filter { isRefreshMultipleOf(it, cap) }.maxOrNull() ?: max
 }
+
+/** The [android.view.Display.Mode] fields a window refresh request needs, kept Android-free for tests. */
+internal data class DisplayModeInfo(val modeId: Int, val width: Int, val height: Int, val refreshHz: Float)
+
+/**
+ * Picks the display mode a game window should prefer so it runs at [rateHz] without a resolution
+ * change: among modes at [width]x[height], the one whose rate equals [rateHz] (NTSC-style slack as
+ * in [isRefreshMultipleOf]), else the highest rate below it. Null when [rateHz] is unusable or no
+ * mode at that resolution qualifies.
+ */
+internal fun pickWindowDisplayMode(
+    modes: List<DisplayModeInfo>,
+    width: Int,
+    height: Int,
+    rateHz: Float,
+): DisplayModeInfo? {
+    if (!rateHz.isFinite() || rateHz <= 0f) return null
+    val slack = rateHz * REFRESH_MULTIPLE_TOLERANCE
+    val candidates = modes.filter {
+        it.width == width && it.height == height && it.refreshHz.isFinite() && it.refreshHz > 0f
+    }
+    return candidates.firstOrNull { abs(it.refreshHz - rateHz) <= slack }
+        ?: candidates.filter { it.refreshHz <= rateHz + slack }.maxByOrNull { it.refreshHz }
+}
