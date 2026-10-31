@@ -87,7 +87,8 @@ object BestConfigService {
     /**
      * Fetches best configuration for a game.
      * Returns cached response if available, otherwise makes API call.
-     * For a Steam game with an entry in the local device profile, returns that entry instead.
+     * For a game with an entry in the local device profile, returns that entry instead: looked up under
+     * [localProfileKeys] ([DeviceProfileService.gameKeys]), or under [steamAppId] when no keys are given.
      */
     suspend fun fetchBestConfig(
         context: Context,
@@ -95,13 +96,16 @@ object BestConfigService {
         gpuName: String,
         gameStore: String,
         steamAppId: Int? = null,
+        localProfileKeys: List<String>? = null,
     ): BestConfigResponse? = withContext(Dispatchers.IO) {
         // A local device profile entry beats the server and needs no network.
-        if (steamAppId != null && gameStore.equals(GameSource.STEAM.name, ignoreCase = true)) {
-            DeviceProfileService.localBestConfig(context, steamAppId, gpuName)?.let {
-                Timber.tag("BestConfigService").d("Using local device profile for appId $steamAppId")
-                return@withContext it
-            }
+        val profileKeys = localProfileKeys
+            ?: steamAppId?.takeIf { gameStore.equals(GameSource.STEAM.name, ignoreCase = true) }
+                ?.let { listOf(it.toString()) }
+                .orEmpty()
+        DeviceProfileService.localBestConfig(context, profileKeys, gpuName, gameStore)?.let {
+            Timber.tag("BestConfigService").d("Using local device profile for keys $profileKeys")
+            return@withContext it
         }
 
         val cacheKey = "${gameName}_${gpuName}_${gameStore}"

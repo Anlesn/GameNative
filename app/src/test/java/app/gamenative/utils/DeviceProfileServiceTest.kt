@@ -63,12 +63,51 @@ class DeviceProfileServiceTest {
 
     private fun JsonObject.str(key: String): String = getValue(key).jsonPrimitive.content
 
+    private val wolfensteinAppName = "a64dcf9b711a4a60a3c0b6f052dfc7da"
+    private val turnipT26 = "Turnip Adreno Driver T26 (@Mr_Purple_666)"
+
     @Test
     fun shippedProfile_parsesWithExpectedGames() {
         assertEquals("OPD2514", shippedProfile.model)
         assertEquals("adreno8EliteGen5", shippedProfile.gpu)
         assertTrue(shippedProfile.games.containsKey("1313140"))
         assertTrue(shippedProfile.games.containsKey("870780"))
+        assertTrue(shippedProfile.games.containsKey("EPIC:$wolfensteinAppName"))
+    }
+
+    @Test
+    fun epicKeys_appNameFirstThenCatalogId() {
+        assertEquals(
+            listOf("EPIC:$wolfensteinAppName", "EPIC:cat"),
+            DeviceProfileService.epicKeys(wolfensteinAppName, "cat"),
+        )
+        assertEquals(listOf("EPIC:x"), DeviceProfileService.epicKeys("x", "x"))
+        assertEquals(listOf("EPIC:cat"), DeviceProfileService.epicKeys("", "cat"))
+    }
+
+    @Test
+    fun gameConfig_epicWolfensteinUsesTurnipAndFex2512() {
+        val keys = DeviceProfileService.epicKeys(wolfensteinAppName, "unknown-catalog")
+        val config = requireNotNull(DeviceProfileService.gameConfig(shippedProfile, keys, base))
+
+        assertEquals("2512", config.str("fexcoreVersion"))
+        assertEquals(turnipT26, config.str("graphicsDriverVersion"))
+        assertEquals("Wrapper", config.str("graphicsDriver"))
+        assertEquals("proton-11.0-1-arm64ec-1", config.str("wineVersion"))
+        assertEquals("INTERMEDIATE", config.str("fexcorePreset"))
+        val driver = KeyValueSet(config.str("graphicsDriverConfig"))
+        assertEquals(turnipT26, driver.get("version"))
+        assertEquals("1", driver.get("adrenotoolsTurnip"))
+        // Steam keys are bare appIds: an Epic name must not match them, nor the reverse.
+        assertNull(DeviceProfileService.gameConfig(shippedProfile, listOf(wolfensteinAppName), base))
+        assertNull(DeviceProfileService.gameConfig(shippedProfile, listOf("EPIC:870780"), base))
+    }
+
+    @Test
+    fun gameKeys_steamContainerIsBareAppId_unknownStoreIsEmpty() {
+        assertEquals(listOf("870780"), DeviceProfileService.gameKeys("STEAM_870780"))
+        assertEquals(listOf("870780"), DeviceProfileService.gameKeys("STEAM_870780(1)"))
+        assertEquals(emptyList<String>(), DeviceProfileService.gameKeys("GOG_1207658924"))
     }
 
     @Test
@@ -202,7 +241,12 @@ class DeviceProfileServiceTest {
         fun ids(type: String) = manifest.items[type].orEmpty().filter { it.variant == "bionic" }.map { it.id }
         val bundledDxvk = context.resources.getStringArray(app.gamenative.R.array.dxvk_version_entries).toList()
 
+        val bundledFexcore = context.resources.getStringArray(app.gamenative.R.array.fexcore_version_entries).toList()
+
         for (entry in listOf(shippedProfile.defaults) + shippedProfile.games.values) {
+            entry["fexcoreVersion"]?.jsonPrimitive?.content?.let {
+                assertTrue(it, it in bundledFexcore || it in ids("fexcore"))
+            }
             entry["wineVersion"]?.jsonPrimitive?.content?.let { assertTrue(it, it in ids("proton")) }
             entry["graphicsDriverVersion"]?.jsonPrimitive?.content?.let { assertTrue(it, it in ids("driver")) }
             entry["dxwrapperConfig"]?.jsonPrimitive?.content?.let {
@@ -229,6 +273,25 @@ class DeviceProfileServiceTest {
         assertNotNull(response)
         assertEquals(BestConfigService.SOURCE_LOCAL, response!!.source)
         assertEquals("Control_DX11.exe", response.bestConfig.str("executablePath"))
+    }
+
+    @Test
+    fun fetchBestConfig_localEpicEntryByProfileKeys() = runBlocking {
+        ShadowBuild.setModel("OPD2514")
+        assertNotNull(DeviceProfileService.load(context) { true })
+
+        val response = BestConfigService.fetchBestConfig(
+            context = context,
+            gameName = "Wolfenstein: The New Order",
+            gpuName = "Adreno (TM) 840",
+            gameStore = "EPIC",
+            localProfileKeys = DeviceProfileService.epicKeys(wolfensteinAppName, "catalog"),
+        )
+
+        assertNotNull(response)
+        assertEquals(BestConfigService.SOURCE_LOCAL, response!!.source)
+        assertEquals("EPIC", response.matchedStore)
+        assertEquals("2512", response.bestConfig.str("fexcoreVersion"))
     }
 
     @Test

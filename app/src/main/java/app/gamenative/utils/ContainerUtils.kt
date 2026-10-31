@@ -907,6 +907,7 @@ object ContainerUtils {
                                 gpuName = gpuName,
                                 gameStore = gameSource.name,
                                 steamAppId = if (gameSource == GameSource.STEAM) extractGameIdFromContainerId(appId) else null,
+                                localProfileKeys = DeviceProfileService.gameKeys(appId),
                             )
                             if (bestConfig != null && bestConfig.matchType != "no_match") {
                                 Timber.i("Applying best config for $gameName (matchType: ${bestConfig.matchType})")

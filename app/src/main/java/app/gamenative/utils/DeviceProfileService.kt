@@ -5,6 +5,7 @@ import android.os.Build
 import androidx.annotation.VisibleForTesting
 import app.gamenative.PrefManager
 import app.gamenative.data.GameSource
+import app.gamenative.service.epic.EpicService
 import com.winlator.container.Container
 import com.winlator.container.ContainerData
 import com.winlator.core.GPUInformation
@@ -31,6 +32,8 @@ import timber.log.Timber
  * applies them. `graphicsDriverConfig`, `dxwrapperConfig` and `envVars` list only the keys to change and
  * are merged onto the base values. `screenSize`, `rendererPresentMode` and the fps limiter fields are not
  * part of the server path and are applied by [applyLocalFields].
+ *
+ * `games` keys: a Steam appId (`"870780"`) or `"EPIC:<appName or catalogId>"` (see [gameKeys]).
  */
 object DeviceProfileService {
     private const val TAG = "DeviceProfile"
@@ -38,6 +41,9 @@ object DeviceProfileService {
 
     const val SOURCE_DEVICE = "device"
     const val SOURCE_GAME = "game"
+
+    /** Prefix of `games` keys for Epic titles; GameNative's `EPIC_<n>` container id is a local row id. */
+    const val EPIC_KEY_PREFIX = "EPIC:"
 
     private const val KEY_GRAPHICS_DRIVER_CONFIG = "graphicsDriverConfig"
     private const val KEY_DXWRAPPER_CONFIG = "dxwrapperConfig"
@@ -124,9 +130,33 @@ object DeviceProfileService {
         mergeLayers(listOf(profile.defaults), base)
 
     /** Device defaults with the game entry on top, or null when the profile has no entry for [steamAppId]. */
-    internal fun gameConfig(profile: DeviceProfile, steamAppId: Int, base: BaseValues): JsonObject? {
-        val game = profile.games[steamAppId.toString()] ?: return null
+    internal fun gameConfig(profile: DeviceProfile, steamAppId: Int, base: BaseValues): JsonObject? =
+        gameConfig(profile, listOf(steamAppId.toString()), base)
+
+    /** Device defaults with the first game entry found under [keys] on top, or null when there is none. */
+    internal fun gameConfig(profile: DeviceProfile, keys: List<String>, base: BaseValues): JsonObject? {
+        val game = keys.firstNotNullOfOrNull { profile.games[it] } ?: return null
         return mergeLayers(listOf(profile.defaults, game), base)
+    }
+
+    /** `games` keys for an Epic title: app name first, then catalog id. */
+    internal fun epicKeys(appName: String, catalogId: String): List<String> =
+        listOf(appName, catalogId).filter { it.isNotBlank() }.distinct().map { EPIC_KEY_PREFIX + it }
+
+    /**
+     * `games` keys for a container id (`STEAM_870780`, `EPIC_82`); empty for stores the profile does not key.
+     * Epic container ids hold a local database row id, so the stable app name and catalog id are looked up.
+     */
+    fun gameKeys(containerId: String): List<String> = try {
+        val gameId = ContainerUtils.extractGameIdFromContainerId(containerId)
+        when (ContainerUtils.extractGameSourceFromContainerId(containerId)) {
+            GameSource.STEAM -> listOf(gameId.toString())
+            GameSource.EPIC -> EpicService.getEpicGameOf(gameId)?.let { epicKeys(it.appName, it.catalogId) }.orEmpty()
+            else -> emptyList()
+        }
+    } catch (e: Exception) {
+        Timber.tag(TAG).w(e, "No profile game keys for $containerId")
+        emptyList()
     }
 
     internal fun mergeLayers(layers: List<JsonObject>, base: BaseValues): JsonObject {
@@ -166,22 +196,30 @@ object DeviceProfileService {
         return entries.values.joinToString(sep)
     }
 
-    /** Local game entry for [steamAppId] as a best-config response, or null when the profile has none. */
-    fun localBestConfig(context: Context, steamAppId: Int, gpuName: String): BestConfigService.BestConfigResponse? {
+    /** Local game entry under [keys] as a best-config response, or null when the profile has none. */
+    fun localBestConfig(
+        context: Context,
+        keys: List<String>,
+        gpuName: String,
+        gameStore: String,
+    ): BestConfigService.BestConfigResponse? {
+        if (keys.isEmpty()) return null
         val profile = load(context) ?: return null
         val base = BaseValues(PrefManager.graphicsDriverConfig, PrefManager.dxWrapperConfig, PrefManager.envVars)
-        val config = gameConfig(profile, steamAppId, base) ?: return null
-        return toBestConfigResponse(config, gpuName)
+        val config = gameConfig(profile, keys, base) ?: return null
+        return toBestConfigResponse(config, gpuName, gameStore)
     }
 
-    internal fun toBestConfigResponse(config: JsonObject, gpuName: String) = BestConfigService.BestConfigResponse(
-        bestConfig = config,
-        matchType = "exact_gpu_match",
-        matchedGpu = gpuName,
-        matchedDeviceId = 0,
-        matchedStore = GameSource.STEAM.name,
-        source = BestConfigService.SOURCE_LOCAL,
-    )
+    // matchedStore = the game's store, so executablePath in the entry survives filterConfigByMatchType.
+    internal fun toBestConfigResponse(config: JsonObject, gpuName: String, gameStore: String = GameSource.STEAM.name) =
+        BestConfigService.BestConfigResponse(
+            bestConfig = config,
+            matchType = "exact_gpu_match",
+            matchedGpu = gpuName,
+            matchedDeviceId = 0,
+            matchedStore = gameStore,
+            source = BestConfigService.SOURCE_LOCAL,
+        )
 
     /**
      * Applies device defaults over [containerData] (which may already hold a server config). Skipped when

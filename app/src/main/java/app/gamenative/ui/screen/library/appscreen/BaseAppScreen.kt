@@ -958,6 +958,7 @@ abstract class BaseAppScreen {
                 gpuName = gpuName,
                 gameStore = libraryItem.gameSource.name,
                 steamAppId = if (libraryItem.gameSource == GameSource.STEAM) gameId else null,
+                localProfileKeys = DeviceProfileService.gameKeys(libraryItem.appId),
             )
             if (bestConfig == null) {
                 SnackbarManager.show(context.getString(R.string.best_config_fetch_failed))
