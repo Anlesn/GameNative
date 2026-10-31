@@ -16,6 +16,9 @@ import com.winlator.xenvironment.components.VortekRendererComponent;
 import com.winlator.xserver.Bitmask;
 import com.winlator.xserver.Drawable;
 import com.winlator.xserver.Pixmap;
+import com.winlator.xserver.VsyncClock;
+import com.winlator.xserver.VsyncLimiterLog;
+import com.winlator.xserver.VsyncPacing;
 import com.winlator.xserver.Window;
 import com.winlator.xserver.XClient;
 import com.winlator.xserver.XLock;
@@ -61,9 +64,19 @@ public class PresentExtension implements Extension {
         Window window; Pixmap pixmap; int serial; int idleFence;
         long targetNs;
         int  vsyncSkips;    // vsyncs left to skip before firing (for fps < refresh)
-        PendingIdle(Window w, Pixmap p, int s, int f, long t, int sk) {
+        long slotNs;        // vsync slot the release is locked to
+        long periodNs;      // vsync period of that slot; 0 = wall-clock release
+        PendingIdle(Window w, Pixmap p, int s, int f, long t, int sk, long slot, long period) {
             window = w; pixmap = p; serial = s; idleFence = f; targetNs = t; vsyncSkips = sk;
+            slotNs = slot; periodNs = period;
         }
+    }
+
+    private final VsyncLimiterLog limiterLog = new VsyncLimiterLog("present");
+
+    private void releaseIdle(PendingIdle p, long releasedNs) {
+        if (p.periodNs > 0 && VsyncPacing.isMiss(releasedNs, p.slotNs, p.periodNs)) limiterLog.onMiss();
+        sendIdleNotify(p.window, p.pixmap, p.serial, p.idleFence);
     }
 
     private final java.util.concurrent.ConcurrentHashMap<Integer, PendingIdle> pendingIdles =
@@ -82,6 +95,7 @@ public class PresentExtension implements Extension {
 
     public void setFrameRateLimit(int limit) {
         this.frameRateLimit = Math.max(0, limit);
+        if (this.frameRateLimit == 0) limiterLog.onDisarm();
     }
 
     public void close() {
@@ -122,7 +136,7 @@ public class PresentExtension implements Extension {
                 long now = System.nanoTime();
                 if (now >= p.targetNs) {
                     if (cpuQueue.remove(p)) {
-                        sendIdleNotify(p.window, p.pixmap, p.serial, p.idleFence);
+                        releaseIdle(p, now);
                     }
                 } else {
                     long diff = p.targetNs - now;
@@ -150,7 +164,7 @@ public class PresentExtension implements Extension {
                     p.vsyncSkips--;
                     anyRemaining = true;
                 } else if (pendingIdles.remove(p.window.id, p)) {
-                    sendIdleNotify(p.window, p.pixmap, p.serial, p.idleFence);
+                    releaseIdle(p, frameTimeNs);
                 }
             } else {
                 anyRemaining = true;
@@ -179,18 +193,28 @@ public class PresentExtension implements Extension {
         final long frameNs = 1_000_000_000L / targetFps;
         long now = System.nanoTime();
 
+        // Vsync-locked when the cap is an integer fraction of the live refresh rate:
+        // the release slot is every n-th vsync, so the phase against the panel never
+        // drifts. Otherwise (no vsync yet, or 45 fps on 60 Hz) wall-clock as before.
+        VsyncPacing.Grid grid = VsyncClock.currentGrid(now);
+        int vsyncs = grid != null ? VsyncPacing.vsyncsPerFrame(grid.refreshHz(), targetFps) : 0;
+        limiterLog.onFrame(targetFps, vsyncs, grid, now);
+
         WindowTiming wt = windowTimings.computeIfAbsent(window.id, k -> new WindowTiming());
-        if (wt.nextIdleNs <= now - frameNs) {
+        if (vsyncs > 0) {
+            wt.nextIdleNs = VsyncPacing.nextSlot(wt.nextIdleNs, now, grid, vsyncs);
+        } else if (wt.nextIdleNs <= now - frameNs) {
             wt.nextIdleNs = now + frameNs;
         } else {
             wt.nextIdleNs += frameNs;
         }
         long fireTime = wt.nextIdleNs - FIRE_EARLY_NS;
+        long slotPeriodNs = vsyncs > 0 ? grid.periodNs : 0;
 
         android.view.Choreographer ch = tryGetChoreographer(renderer);
         if (ch != null) {
             PendingIdle superseded = pendingIdles.put(window.id,
-                    new PendingIdle(window, pixmap, serial, idleFence, fireTime, 0));
+                    new PendingIdle(window, pixmap, serial, idleFence, fireTime, 0, wt.nextIdleNs, slotPeriodNs));
             if (superseded != null) {
                 if (eagerIdleRelease) {
                     sendIdleNotify(superseded.window, superseded.pixmap,
@@ -210,7 +234,8 @@ public class PresentExtension implements Extension {
                     }
                 }
             }
-            cpuQueue.offer(new PendingIdle(window, pixmap, serial, idleFence, fireTime, 0));
+            cpuQueue.offer(new PendingIdle(window, pixmap, serial, idleFence, fireTime, 0,
+                    wt.nextIdleNs, slotPeriodNs));
         }
     }
 
