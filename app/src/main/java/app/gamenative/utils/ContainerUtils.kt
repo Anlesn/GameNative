@@ -1033,6 +1033,12 @@ object ContainerUtils {
             } else {
                 DeviceProfileService.applyDeviceDefaults(context, container, containerData, appId)
             }
+            containerData = DeviceProfileService.applyRules(
+                context,
+                containerData,
+                appId,
+                containerData.executablePath.ifEmpty { container.executablePath },
+            )
         }
 
         if (BuildConfig.XR_BUILD && MainActivity.isMetaQuest()) {

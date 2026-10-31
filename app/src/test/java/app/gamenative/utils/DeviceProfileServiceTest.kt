@@ -73,6 +73,7 @@ class DeviceProfileServiceTest {
         assertTrue(shippedProfile.games.containsKey("1313140"))
         assertTrue(shippedProfile.games.containsKey("870780"))
         assertTrue(shippedProfile.games.containsKey("EPIC:$wolfensteinAppName"))
+        assertEquals("2512", shippedProfile.rules.getValue("fexExePath").str("fexcoreVersion"))
     }
 
     @Test
@@ -108,6 +109,65 @@ class DeviceProfileServiceTest {
         assertEquals(listOf("870780"), DeviceProfileService.gameKeys("STEAM_870780"))
         assertEquals(listOf("870780"), DeviceProfileService.gameKeys("STEAM_870780(1)"))
         assertEquals(emptyList<String>(), DeviceProfileService.gameKeys("GOG_1207658924"))
+    }
+
+    private fun fexData(fexcore: String, wine: String = "proton-11.0-1-arm64ec-1") =
+        ContainerData(wineVersion = wine, fexcoreVersion = fexcore)
+
+    @Test
+    fun fexExePathOverride_firesOnlyForAffectedVersionAndPath() {
+        val root = { "A:\\WolfNewOrder_x64.exe" }
+        assertEquals("2512", DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2603"), root))
+        assertEquals("2512", DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2608-0"), root))
+        assertNull(DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2610-gn-4"), root))
+        assertNull(DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2512"), root))
+        assertNull(
+            DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2603")) { "A:\\Game\\WolfNewOrder_x64.exe" },
+        )
+        assertNull(DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2603")) { null })
+        // x86-64 Wine runs Box64, not FEX.
+        assertNull(DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2603", "proton-11.0-1-x86_64"), root))
+        // No rule in the profile: nothing changes.
+        assertNull(DeviceProfileService.fexExePathOverride(shippedProfile.copy(rules = emptyMap()), fexData("2603"), root))
+    }
+
+    @Test
+    fun fexExePathOverride_resolvesPathOnlyForAffectedVersion() {
+        var resolved = 0
+        DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2610-gn-4")) { resolved++; "A:\\X.exe" }
+        assertEquals(0, resolved)
+    }
+
+    @Test
+    fun applyRules_customGameAtDriveRootGetsFex2512() {
+        ShadowBuild.setModel("OPD2514")
+        assertNotNull(DeviceProfileService.load(context) { true })
+
+        val atRoot = ContainerData(
+            wineVersion = "proton-11.0-1-arm64ec-1",
+            fexcoreVersion = "2605",
+            executablePath = "WolfNewOrder_x64.exe",
+        )
+        assertEquals("2512", DeviceProfileService.applyRules(context, atRoot, "CUSTOM_GAME_42").fexcoreVersion)
+
+        // `A:\Game\` is 8 bytes: the file name starts past the overwritten prefix.
+        val inFolder = atRoot.copy(executablePath = "Game/WolfNewOrder_x64.exe")
+        assertSame(inFolder, DeviceProfileService.applyRules(context, inFolder, "CUSTOM_GAME_42"))
+        // Exe path passed separately (container creation keeps it on the container, not in the data).
+        val noExe = atRoot.copy(executablePath = "")
+        assertEquals(
+            "2512",
+            DeviceProfileService.applyRules(context, noExe, "CUSTOM_GAME_42", "WolfNewOrder_x64.exe").fexcoreVersion,
+        )
+        // Steam exes are launched from steamapps/common, not the drive root.
+        assertSame(atRoot, DeviceProfileService.applyRules(context, atRoot, "STEAM_201810"))
+    }
+
+    @Test
+    fun applyRules_noProfile_returnsSameData() {
+        ShadowBuild.setModel("SM-S928B")
+        val data = fexData("2603").copy(executablePath = "WolfNewOrder_x64.exe")
+        assertSame(data, DeviceProfileService.applyRules(context, data, "CUSTOM_GAME_42"))
     }
 
     @Test
@@ -243,7 +303,7 @@ class DeviceProfileServiceTest {
 
         val bundledFexcore = context.resources.getStringArray(app.gamenative.R.array.fexcore_version_entries).toList()
 
-        for (entry in listOf(shippedProfile.defaults) + shippedProfile.games.values) {
+        for (entry in listOf(shippedProfile.defaults) + shippedProfile.games.values + shippedProfile.rules.values) {
             entry["fexcoreVersion"]?.jsonPrimitive?.content?.let {
                 assertTrue(it, it in bundledFexcore || it in ids("fexcore"))
             }

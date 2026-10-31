@@ -33,7 +33,8 @@ import timber.log.Timber
  * are merged onto the base values. `screenSize`, `rendererPresentMode` and the fps limiter fields are not
  * part of the server path and are applied by [applyLocalFields].
  *
- * `games` keys: a Steam appId (`"870780"`) or `"EPIC:<appName or catalogId>"` (see [gameKeys]).
+ * `games` keys: a Steam appId (`"870780"`) or `"EPIC:<appName or catalogId>"` (see [gameKeys]). `rules`
+ * holds device-level fixes evaluated on the final container data, see [applyRules].
  */
 object DeviceProfileService {
     private const val TAG = "DeviceProfile"
@@ -44,6 +45,10 @@ object DeviceProfileService {
 
     /** Prefix of `games` keys for Epic titles; GameNative's `EPIC_<n>` container id is a local row id. */
     const val EPIC_KEY_PREFIX = "EPIC:"
+
+    /** Rule: swap FEXCore versions hit by [FexExePathRule] for the version given in the rule. */
+    const val RULE_FEX_EXE_PATH = "fexExePath"
+    private const val KEY_FEXCORE_VERSION = "fexcoreVersion"
 
     private const val KEY_GRAPHICS_DRIVER_CONFIG = "graphicsDriverConfig"
     private const val KEY_DXWRAPPER_CONFIG = "dxwrapperConfig"
@@ -60,6 +65,7 @@ object DeviceProfileService {
         val gpu: String,
         val defaults: JsonObject,
         val games: Map<String, JsonObject>,
+        val rules: Map<String, JsonObject> = emptyMap(),
     )
 
     /** Values the profile's partial config strings are merged onto. */
@@ -109,6 +115,7 @@ object DeviceProfileService {
                     gpu = root["gpu"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                     defaults = defaults,
                     games = root["games"]?.jsonObject?.mapValues { it.value.jsonObject }.orEmpty(),
+                    rules = root["rules"]?.jsonObject?.mapValues { it.value.jsonObject }.orEmpty(),
                 )
             }
         } catch (e: Exception) {
@@ -220,6 +227,63 @@ object DeviceProfileService {
             matchedStore = gameStore,
             source = BestConfigService.SOURCE_LOCAL,
         )
+
+    /**
+     * Version to use instead of [ContainerData.fexcoreVersion] under [RULE_FEX_EXE_PATH], or null when the rule
+     * is off or does not fire. [launchPath] is resolved only when the version is affected. arm64ec Wine runs 64-bit
+     * guests through FEX regardless of the WoW64 emulator setting, so only the Wine build is checked.
+     */
+    internal fun fexExePathOverride(profile: DeviceProfile, data: ContainerData, launchPath: () -> String?): String? {
+        val fallback = profile.rules[RULE_FEX_EXE_PATH]?.string(KEY_FEXCORE_VERSION) ?: return null
+        if (!data.wineVersion.contains("arm64ec", ignoreCase = true)) return null
+        if (!FexExePathRule.isAffectedVersion(data.fexcoreVersion)) return null
+        val path = launchPath() ?: return null
+        return fallback.takeIf { FexExePathRule.isAffectedPath(path) }
+    }
+
+    /**
+     * Applies the profile `rules` to [containerData]. Called only where GameNative itself picks the config
+     * (new container, "Use known config"), never at launch, so a version the user set later stays.
+     */
+    fun applyRules(
+        context: Context,
+        containerData: ContainerData,
+        appId: String,
+        executablePath: String = containerData.executablePath,
+    ): ContainerData {
+        val profile = load(context) ?: return containerData
+        var launchPath: String? = null
+        val fexcore = fexExePathOverride(profile, containerData) {
+            launchedExePath(appId, executablePath).also { launchPath = it }
+        } ?: return containerData
+        Timber.tag(TAG).i(
+            "Applied rule=$RULE_FEX_EXE_PATH appId=$appId exe=$launchPath" +
+                " fexcore=${containerData.fexcoreVersion}->$fexcore",
+        )
+        return containerData.copy(fexcoreVersion = fexcore)
+    }
+
+    /**
+     * Windows path the game exe is launched with, mirroring the Epic and custom-game branches of
+     * `XServerScreen.getWineStartCommand`; null for other stores (their exe is not at `A:\`) or when unknown.
+     */
+    private fun launchedExePath(appId: String, executablePath: String): String? = try {
+        when (ContainerUtils.extractGameSourceFromContainerId(appId)) {
+            GameSource.EPIC -> {
+                val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
+                val game = EpicService.getEpicGameOf(gameId)?.takeIf { it.isInstalled && it.installPath.isNotEmpty() }
+                val exe = executablePath.ifEmpty {
+                    runBlocking(Dispatchers.IO) { EpicService.getInstance()?.epicManager?.getInstalledExe(gameId) }.orEmpty()
+                }
+                if (game == null || exe.isEmpty()) null else FexExePathRule.gameDrivePath(exe, game.installPath)
+            }
+            GameSource.CUSTOM_GAME -> executablePath.takeIf { it.isNotEmpty() }?.let { FexExePathRule.gameDrivePath(it) }
+            else -> null
+        }
+    } catch (e: Exception) {
+        Timber.tag(TAG).w(e, "Launch path unknown for $appId")
+        null
+    }
 
     /**
      * Applies device defaults over [containerData] (which may already hold a server config). Skipped when

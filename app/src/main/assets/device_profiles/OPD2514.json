@@ -34,5 +34,10 @@
       "graphicsDriverConfig": "version=Turnip Adreno Driver T26 (@Mr_Purple_666)",
       "fexcoreVersion": "2512"
     }
+  },
+  "rules": {
+    "fexExePath": {
+      "fexcoreVersion": "2512"
+    }
   }
 }
