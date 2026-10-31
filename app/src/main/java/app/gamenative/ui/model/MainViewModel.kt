@@ -797,11 +797,11 @@ class MainViewModel @Inject constructor(
 
                         val shown = container.getExtra("discord_support_prompt_shown", "false") == "true"
                         val configChanged = container.getExtra("config_changed", "false") == "true"
+                        var feedbackDue = false
                         if (!shown) {
                             container.putExtra("discord_support_prompt_shown", "true")
                             container.saveData()
-                            feedbackRequested = true
-                            _uiEvent.send(MainUiEvent.ShowGameFeedbackDialog(appId))
+                            feedbackDue = true
                         }
 
                         // Only show feedback if container config was changed before this game run
@@ -809,9 +809,17 @@ class MainViewModel @Inject constructor(
                             // Clear the flag
                             container.putExtra("config_changed", "false")
                             container.saveData()
-                            // Show the feedback dialog
-                            feedbackRequested = true
-                            _uiEvent.send(MainUiEvent.ShowGameFeedbackDialog(appId))
+                            feedbackDue = true
+                        }
+
+                        // Flags are consumed either way, so enabling the setting later does not replay old changes
+                        if (feedbackDue) {
+                            if (PrefManager.askGameFeedbackAfterExit) {
+                                feedbackRequested = true
+                                _uiEvent.send(MainUiEvent.ShowGameFeedbackDialog(appId))
+                            } else {
+                                Timber.i("Game feedback prompt skipped for $appId: disabled in settings")
+                            }
                         }
                     } else {
                         Timber.d("Custom game detected, not showing feedback")

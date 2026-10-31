@@ -463,6 +463,18 @@ fun SettingsGroupInterface(
             },
         )
 
+        var askGameFeedbackAfterExit by rememberSaveable { mutableStateOf(PrefManager.askGameFeedbackAfterExit) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_interface_ask_game_feedback_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_interface_ask_game_feedback_subtitle)) },
+            state = askGameFeedbackAfterExit,
+            onCheckedChange = {
+                askGameFeedbackAfterExit = it
+                PrefManager.askGameFeedbackAfterExit = it
+            },
+        )
+
         var bootScreenAds by rememberSaveable { mutableStateOf(PrefManager.bootScreenAdsEnabled) }
         SettingsSwitch(
             colors = settingsTileColorsAlt(),

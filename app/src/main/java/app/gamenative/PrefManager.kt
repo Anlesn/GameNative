@@ -2,6 +2,7 @@ package app.gamenative
 
 import android.content.Context
 import android.content.pm.ActivityInfo
+import android.os.Build
 import androidx.compose.runtime.mutableStateOf
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
@@ -27,6 +28,7 @@ import app.gamenative.ui.enums.HomeDestination
 import app.gamenative.ui.enums.LibraryTab
 import app.gamenative.ui.enums.Orientation
 import app.gamenative.ui.enums.PaneType
+import app.gamenative.utils.shouldAskGameFeedbackAfterExit
 import com.materialkolor.PaletteStyle
 import com.winlator.box86_64.Box86_64Preset
 import com.winlator.container.Container
@@ -1513,6 +1515,24 @@ object PrefManager {
         get() = getPref(HIDE_AI_FEATURES, false)
         set(value) {
             setPref(HIDE_AI_FEATURES, value)
+        }
+
+    // Unset = upstream default (ask), except on the OnePlus Pad 4, where it defaults to off
+    private val ASK_GAME_FEEDBACK_AFTER_EXIT = booleanPreferencesKey("ask_game_feedback_after_exit")
+    var askGameFeedbackAfterExit: Boolean
+        get() {
+            val stored = runBlocking {
+                try {
+                    dataStore.data.first()[ASK_GAME_FEEDBACK_AFTER_EXIT]
+                } catch (e: IOException) {
+                    Timber.w(e, "Failed to read preference ${ASK_GAME_FEEDBACK_AFTER_EXIT.name}, using default")
+                    null
+                }
+            }
+            return shouldAskGameFeedbackAfterExit(stored, Build.MODEL)
+        }
+        set(value) {
+            setPref(ASK_GAME_FEEDBACK_AFTER_EXIT, value)
         }
 
     // Show game recommendations in library
