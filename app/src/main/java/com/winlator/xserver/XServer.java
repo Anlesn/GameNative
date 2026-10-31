@@ -219,7 +219,20 @@ public class XServer {
         return inputEventSink;
     }
 
+    /** Called on every injected pointer move, from whichever thread injects it. */
+    private volatile Runnable pointerMoveListener;
+
+    public void setPointerMoveListener(Runnable listener) {
+        pointerMoveListener = listener;
+    }
+
+    private void notifyPointerMove() {
+        Runnable listener = pointerMoveListener;
+        if (listener != null) listener.run();
+    }
+
     public void injectPointerMove(int x, int y) {
+        notifyPointerMove();
         InputEventSink sink = inputEventSink;
         if (sink != null) {
             try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.INPUT_DEVICE)) {
@@ -236,6 +249,7 @@ public class XServer {
 
     public void injectPointerMoveDelta(int dx, int dy) {
         if (dx == 0 && dy == 0) return;
+        notifyPointerMove();
 
         InputEventSink sink = inputEventSink;
         if (sink != null) {

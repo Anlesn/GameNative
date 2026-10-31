@@ -637,6 +637,7 @@ fun XServerScreen(
             PluviaApp.radialMenuCoordinator = null
             ui.physicalControllerHandler?.cleanup()
             ui.physicalControllerHandler = null
+            ui.xServerView?.getxServer()?.setPointerMoveListener(null)
             sc.mapper?.stop()
             sc.mapper = null
             ui.exitWatchJob?.cancel()
@@ -648,12 +649,21 @@ fun XServerScreen(
     // Snapshot of element positions before entering edit mode (for cancel behavior)
     var showPlayingBlockedDialog by rememberSaveable { mutableStateOf(false) }
     var playingBlockedRemoteName by rememberSaveable { mutableStateOf<String?>(null) }
+    val cursorAutoHide = remember { CursorAutoHide() }
     fun shouldShowMouseCursor(): Boolean {
         return !container.isDisableMouseInput &&
-            (!container.isTouchscreenMode || ui.currentGestureConfig.showCursorInTouchscreenMode)
+            (!container.isTouchscreenMode || ui.currentGestureConfig.showCursorInTouchscreenMode) &&
+            !cursorAutoHide.isHidden()
     }
     fun applyMouseCursorVisibility() {
         ui.xServerView?.renderer?.setCursorVisible(shouldShowMouseCursor())
+    }
+    fun onCursorAutoHideChanged(reason: String) {
+        Timber.d("Cursor auto-hide: hidden=%s (%s)", cursorAutoHide.isHidden(), reason)
+        (context as? Activity)?.runOnUiThread { applyMouseCursorVisibility() }
+    }
+    fun noteGamepadInputForCursor() {
+        if (cursorAutoHide.onGamepadInput(SystemClock.uptimeMillis())) onCursorAutoHideChanged("gamepad")
     }
     val clickHighlightPoints = remember { mutableStateListOf<app.gamenative.ui.component.HighlightPoint>() }
     val shouldTrackDisplayedFrames = remember { AtomicBoolean(false) }
@@ -1739,6 +1749,7 @@ fun XServerScreen(
         } else {
             var handled = false
             if (isGamepad) {
+                if (it.event.action == KeyEvent.ACTION_DOWN) noteGamepadInputForCursor()
                 val winHandler = ui.xServerView!!.getxServer().winHandler
                 if (it.event.action == KeyEvent.ACTION_DOWN && it.event.repeatCount == 0 &&
                     ControllerManager.getInstance().noteGamepadButton(it.event.device.id)
@@ -1795,6 +1806,7 @@ fun XServerScreen(
         } else {
             var handled = false
             if (isGamepad && it.event != null) {
+                noteGamepadInputForCursor()
                 val winHandler = ui.xServerView!!.getxServer().winHandler
                 ControllerManager.getInstance().noteGamepadActivity(it.event)
                 val assignedSlot = ControllerManager.getInstance().getSlotForDevice(it.event.device.id)
@@ -2166,6 +2178,9 @@ fun XServerScreen(
                     }
                 }
                 getxServer().renderer = renderer
+                getxServer().setPointerMoveListener {
+                    if (cursorAutoHide.onPointerMove(SystemClock.uptimeMillis())) onCursorAutoHideChanged("pointer")
+                }
                 PluviaApp.touchpadView = TouchpadView(context, getxServer(), PrefManager.getBoolean("capture_pointer_on_external_mouse", true))
                 PluviaApp.touchpadView?.setMoveCursorToTouchpoint(PrefManager.getBoolean("move_cursor_to_touchpoint", false))
 
