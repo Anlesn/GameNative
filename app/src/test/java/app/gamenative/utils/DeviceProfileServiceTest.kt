@@ -381,6 +381,70 @@ class DeviceProfileServiceTest {
     }
 
     @Test
+    fun shippedProfile_pinsX11ForDefaultsAndGameEntries() {
+        assertEquals(Container.DISPLAY_SERVER_X11, DeviceProfileService.deviceConfig(shippedProfile, base).str("displayServer"))
+        val control = requireNotNull(DeviceProfileService.gameConfig(shippedProfile, 870780, base))
+        assertEquals(Container.DISPLAY_SERVER_X11, control.str("displayServer"))
+    }
+
+    @Test
+    fun applyDeviceDefaults_replacesGamescopeWithX11() {
+        ShadowBuild.setModel("OPD2514")
+        assertNotNull(DeviceProfileService.load(context) { true })
+        val container = Container("STEAM_220")
+        val data = ContainerData(containerVariant = Container.BIONIC, displayServer = Container.DISPLAY_SERVER_GAMESCOPE)
+
+        val updated = DeviceProfileService.applyDeviceDefaults(context, container, data, "STEAM_220", userSavedDefaults = false)
+
+        assertEquals(Container.DISPLAY_SERVER_X11, updated.displayServer)
+        assertEquals("1920x1080", updated.screenSize)
+    }
+
+    @Test
+    fun applyDeviceDefaults_userSavedDefaults_keepDisplayServer() {
+        ShadowBuild.setModel("OPD2514")
+        assertNotNull(DeviceProfileService.load(context) { true })
+        val data = ContainerData(containerVariant = Container.BIONIC, displayServer = Container.DISPLAY_SERVER_GAMESCOPE)
+        assertSame(
+            data,
+            DeviceProfileService.applyDeviceDefaults(context, Container("STEAM_220"), data, "STEAM_220", userSavedDefaults = true),
+        )
+    }
+
+    @Test
+    fun applyLocalFields_gameEntryOverridesDisplayServer_unknownValueIgnored() {
+        val profile = requireNotNull(
+            DeviceProfileService.parse(
+                """
+                {"model": "OPD2514", "defaults": {"displayServer": "x11"},
+                 "games": {"220": {"displayServer": "Gamescope"}, "400": {"displayServer": "wayland"}}}
+                """.trimIndent(),
+            ),
+        )
+        val x11Data = ContainerData(displayServer = Container.DISPLAY_SERVER_X11)
+
+        val game = requireNotNull(DeviceProfileService.gameConfig(profile, 220, base))
+        val updated = DeviceProfileService.applyLocalFields(
+            Container("STEAM_220"),
+            x11Data,
+            game,
+            DeviceProfileService.SOURCE_GAME,
+            "STEAM_220",
+        )
+        assertEquals(Container.DISPLAY_SERVER_GAMESCOPE, updated.displayServer)
+
+        val unknown = requireNotNull(DeviceProfileService.gameConfig(profile, 400, base))
+        val kept = DeviceProfileService.applyLocalFields(
+            Container("STEAM_400"),
+            x11Data,
+            unknown,
+            DeviceProfileService.SOURCE_GAME,
+            "STEAM_400",
+        )
+        assertEquals(Container.DISPLAY_SERVER_X11, kept.displayServer)
+    }
+
+    @Test
     fun mergeConfigString_overridesInPlaceAndAppendsNewKeys() {
         assertEquals("a=1,b=9,c=3", DeviceProfileService.mergeConfigString("a=1,b=2", "b=9,c=3"))
         assertEquals("x=1", DeviceProfileService.mergeConfigString("", "x=1"))

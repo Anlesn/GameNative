@@ -13,6 +13,7 @@
     "fexcorePreset": "INTERMEDIATE",
     "envVars": "WRAPPER_USE_BCN_CACHE=1",
     "screenSize": "1920x1080",
+    "displayServer": "x11",
     "rendererPresentMode": "fifo",
     "fpsLimiterEnabled": false
   },

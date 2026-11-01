@@ -30,8 +30,8 @@ import timber.log.Timber
  * Priority: explicit user choice > local game entry > local device defaults > server best-config.
  * Profile fields use the server best-config names so [BestConfigService.parseConfigResult] validates and
  * applies them. `graphicsDriverConfig`, `dxwrapperConfig` and `envVars` list only the keys to change and
- * are merged onto the base values. `screenSize`, `rendererPresentMode` and the fps limiter fields are not
- * part of the server path and are applied by [applyLocalFields].
+ * are merged onto the base values. `screenSize`, `displayServer`, `rendererPresentMode` and the fps limiter
+ * fields are not part of the server path and are applied by [applyLocalFields].
  *
  * `games` keys: a Steam appId (`"870780"`) or `"EPIC:<appName or catalogId>"` (see [gameKeys]). `rules`
  * holds device-level fixes evaluated on the final container data, see [applyRules].
@@ -55,6 +55,10 @@ object DeviceProfileService {
     private const val KEY_ENV_VARS = "envVars"
     private const val KEY_SCREEN_SIZE = "screenSize"
     private const val KEY_RENDERER_PRESENT_MODE = "rendererPresentMode"
+
+    // Pad 4 pins X11: the gamescope path swaps the Vulkan ICD for gn-vkshim, bypassing the Wrapper driver.
+    private const val KEY_DISPLAY_SERVER = "displayServer"
+    private val DISPLAY_SERVERS = setOf(Container.DISPLAY_SERVER_X11, Container.DISPLAY_SERVER_GAMESCOPE)
 
     // Container extras read by XServerScreen (FPS_LIMITER_ENABLED_EXTRA / FPS_LIMITER_TARGET_EXTRA).
     private const val KEY_FPS_LIMITER_ENABLED = "fpsLimiterEnabled"
@@ -289,9 +293,15 @@ object DeviceProfileService {
      * Applies device defaults over [containerData] (which may already hold a server config). Skipped when
      * the user saved default container settings: that is an explicit choice.
      */
-    fun applyDeviceDefaults(context: Context, container: Container, containerData: ContainerData, appId: String): ContainerData {
+    fun applyDeviceDefaults(
+        context: Context,
+        container: Container,
+        containerData: ContainerData,
+        appId: String,
+        userSavedDefaults: Boolean = PrefManager.hasSavedContainerDefaults,
+    ): ContainerData {
         val profile = load(context) ?: return containerData
-        if (PrefManager.hasSavedContainerDefaults) {
+        if (userSavedDefaults) {
             Timber.tag(TAG).i("Local profile skipped source=$SOURCE_DEVICE appId=$appId: user saved default settings")
             return containerData
         }
@@ -316,8 +326,8 @@ object DeviceProfileService {
     }
 
     /**
-     * Applies the profile fields the server path does not carry: screen size and renderer present mode go
-     * into the returned data, the fps limiter into [container] extras. Logs the applied source.
+     * Applies the profile fields the server path does not carry: screen size, display server and renderer
+     * present mode go into the returned data, the fps limiter into [container] extras. Logs the applied source.
      */
     fun applyLocalFields(
         container: Container,
@@ -328,6 +338,14 @@ object DeviceProfileService {
     ): ContainerData {
         var updated = containerData
         config.string(KEY_SCREEN_SIZE)?.let { updated = updated.copy(screenSize = it) }
+        config.string(KEY_DISPLAY_SERVER)?.let { value ->
+            val displayServer = value.lowercase()
+            if (displayServer in DISPLAY_SERVERS) {
+                updated = updated.copy(displayServer = displayServer)
+            } else {
+                Timber.tag(TAG).w("Ignored unknown displayServer=$value source=$source appId=$appId")
+            }
+        }
         config.string(KEY_RENDERER_PRESENT_MODE)?.let { updated = updated.copy(rendererPresentMode = it) }
         (config[KEY_FPS_LIMITER_ENABLED] as? JsonPrimitive)?.booleanOrNull?.let {
             container.putExtra(KEY_FPS_LIMITER_ENABLED, it)
@@ -335,7 +353,10 @@ object DeviceProfileService {
         (config[KEY_FPS_LIMITER_TARGET] as? JsonPrimitive)?.intOrNull?.takeIf { it > 0 }?.let {
             container.putExtra(KEY_FPS_LIMITER_TARGET, it)
         }
-        Timber.tag(TAG).i("Applied local profile source=$source appId=$appId model=${Build.MODEL}")
+        Timber.tag(TAG).i(
+            "Applied local profile source=$source appId=$appId model=${Build.MODEL}" +
+                " displayServer=${updated.displayServer}",
+        )
         return updated
     }
 
