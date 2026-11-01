@@ -3,6 +3,7 @@ package app.gamenative.ui.component
 import com.winlator.core.envvars.EnvVars
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -306,5 +307,42 @@ class FpsLimiterUtilsTest {
         assertFalse(isRefreshMultipleOf(50f, 48))
         assertTrue(isRefreshMultipleOf(59.94f, 60))
         assertFalse(isRefreshMultipleOf(60f, 0))
+    }
+
+    // ── pickWindowDisplayMode ────────────────────────────────────────────────
+
+    private val padModes = listOf(
+        DisplayModeInfo(1, 3392, 2400, 60f),
+        DisplayModeInfo(2, 3392, 2400, 90f),
+        DisplayModeInfo(3, 3392, 2400, 120f),
+        DisplayModeInfo(4, 3392, 2400, 144f),
+        DisplayModeInfo(5, 1696, 1200, 120f),
+    )
+
+    @Test
+    fun `window mode picks the exact rate at the current resolution`() {
+        assertEquals(3, pickWindowDisplayMode(padModes, 3392, 2400, 120f)?.modeId)
+        assertEquals(5, pickWindowDisplayMode(padModes, 1696, 1200, 120f)?.modeId)
+    }
+
+    @Test
+    fun `window mode accepts NTSC-style rates as exact`() {
+        val modes = listOf(DisplayModeInfo(7, 1920, 1080, 59.94f), DisplayModeInfo(8, 1920, 1080, 119.88f))
+        assertEquals(8, pickWindowDisplayMode(modes, 1920, 1080, 120f)?.modeId)
+    }
+
+    @Test
+    fun `window mode falls back to the highest rate below the request`() {
+        assertEquals(3, pickWindowDisplayMode(padModes, 3392, 2400, 130f)?.modeId)
+        assertEquals(2, pickWindowDisplayMode(padModes, 3392, 2400, 100f)?.modeId)
+    }
+
+    @Test
+    fun `window mode is null without a qualifying mode`() {
+        assertNull(pickWindowDisplayMode(emptyList(), 3392, 2400, 120f))
+        assertNull(pickWindowDisplayMode(padModes, 1280, 800, 120f))
+        assertNull(pickWindowDisplayMode(padModes, 1696, 1200, 60f))
+        assertNull(pickWindowDisplayMode(padModes, 3392, 2400, 30f))
+        assertNull(pickWindowDisplayMode(padModes, 3392, 2400, 0f))
     }
 }

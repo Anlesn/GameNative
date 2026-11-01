@@ -132,6 +132,7 @@ import app.gamenative.ui.component.PerformanceQuickMenuState
 import app.gamenative.ui.component.QuickMenu
 import app.gamenative.ui.component.QuickMenuAction
 import app.gamenative.ui.component.SteamInviteState
+import app.gamenative.ui.component.DisplayModeInfo
 import app.gamenative.ui.component.bestRefreshFor
 import app.gamenative.ui.component.dialog.ScConfigManagerDialog
 import app.gamenative.ui.component.dialog.ScOverlayEditorDialog
@@ -141,6 +142,7 @@ import app.gamenative.ui.component.applyEngineFrameRateCaps
 import app.gamenative.ui.component.isRefreshMultipleOf
 import app.gamenative.ui.component.parseBooleanExtra
 import app.gamenative.ui.component.parsePositiveFpsLimit
+import app.gamenative.ui.component.pickWindowDisplayMode
 import app.gamenative.ui.data.PerformanceHudConfig
 import app.gamenative.ui.data.PerformanceHudSize
 import app.gamenative.ui.data.XServerState
@@ -347,6 +349,46 @@ internal fun detectSupportedRefreshRatesHz(context: Context, attachedView: View?
         .filter { it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight }
         .map { it.refreshRate }
         .distinct()
+}
+
+/**
+ * Asks the window hosting the game surface for the current-resolution display mode at [rateHz], or
+ * clears the request when [rateHz] is 0. OxygenOS forces 60 Hz on a fullscreen window with a large
+ * SurfaceView unless the window itself sets preferredRefreshRate or preferredDisplayModeId
+ * (OplusRefreshRatePolicyImpl); a Surface.setFrameRate vote on the surface cannot override it.
+ */
+private fun applyWindowRefreshRequest(activity: Activity?, attachedView: View?, rateHz: Float, reason: String) {
+    if (activity == null) return
+    activity.runOnUiThread {
+        val mode = if (rateHz > 0f) {
+            resolveDisplay(activity, attachedView)?.let { display ->
+                val current = display.mode
+                pickWindowDisplayMode(
+                    display.supportedModes.map {
+                        DisplayModeInfo(it.modeId, it.physicalWidth, it.physicalHeight, it.refreshRate)
+                    },
+                    current.physicalWidth,
+                    current.physicalHeight,
+                    rateHz,
+                )
+            }
+        } else {
+            null
+        }
+        val window = activity.window ?: return@runOnUiThread
+        val attrs = window.attributes
+        val modeId = mode?.modeId ?: 0
+        val refreshHz = mode?.refreshHz ?: 0f
+        if (attrs.preferredDisplayModeId == modeId && attrs.preferredRefreshRate == refreshHz) return@runOnUiThread
+        attrs.preferredDisplayModeId = modeId
+        attrs.preferredRefreshRate = refreshHz
+        window.attributes = attrs
+        if (mode != null) {
+            Timber.i("Window refresh request: %.2f Hz (modeId=%d) reason=%s", refreshHz, modeId, reason)
+        } else {
+            Timber.i("Window refresh request cleared reason=%s", reason)
+        }
+    }
 }
 
 private data class XServerViewReleaseBinding(
@@ -579,6 +621,12 @@ fun XServerScreen(
         }
     }
 
+    // The game window's refresh request (applyFpsLimiterToEngines) must not outlive the session:
+    // MainActivity also hosts the library UI, which belongs to the normal display policy.
+    DisposableEffect(activity) {
+        onDispose { applyWindowRefreshRequest(activity, null, 0f, "session ended") }
+    }
+
     val suspendPolicy = remember(container.id) { container.suspendPolicy }
     val neverSuspend = suspendPolicy.equals(Container.SUSPEND_POLICY_NEVER, ignoreCase = true)
     val manualResumeMode = suspendPolicy.equals(Container.SUSPEND_POLICY_MANUAL, ignoreCase = true)
@@ -767,6 +815,7 @@ fun XServerScreen(
             else -> "no multiple of cap, max rate"
         }
         Timber.i("Refresh-rate hint %.2f Hz for %d fps (%s), supported=%s", refreshHz, presentedFps, reason, supportedHz)
+        applyWindowRefreshRequest(activity, ui.xServerView as? View, refreshHz, "$presentedFps fps, $reason")
     }
 
     fun effectiveFpsLimit(): Int =
