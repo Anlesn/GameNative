@@ -63,12 +63,111 @@ class DeviceProfileServiceTest {
 
     private fun JsonObject.str(key: String): String = getValue(key).jsonPrimitive.content
 
+    private val wolfensteinAppName = "a64dcf9b711a4a60a3c0b6f052dfc7da"
+    private val turnipT26 = "Turnip Adreno Driver T26 (@Mr_Purple_666)"
+
     @Test
     fun shippedProfile_parsesWithExpectedGames() {
         assertEquals("OPD2514", shippedProfile.model)
         assertEquals("adreno8EliteGen5", shippedProfile.gpu)
         assertTrue(shippedProfile.games.containsKey("1313140"))
         assertTrue(shippedProfile.games.containsKey("870780"))
+        assertTrue(shippedProfile.games.containsKey("EPIC:$wolfensteinAppName"))
+        assertEquals("2512", shippedProfile.rules.getValue("fexExePath").str("fexcoreVersion"))
+    }
+
+    @Test
+    fun epicKeys_appNameFirstThenCatalogId() {
+        assertEquals(
+            listOf("EPIC:$wolfensteinAppName", "EPIC:cat"),
+            DeviceProfileService.epicKeys(wolfensteinAppName, "cat"),
+        )
+        assertEquals(listOf("EPIC:x"), DeviceProfileService.epicKeys("x", "x"))
+        assertEquals(listOf("EPIC:cat"), DeviceProfileService.epicKeys("", "cat"))
+    }
+
+    @Test
+    fun gameConfig_epicWolfensteinUsesTurnipAndFex2512() {
+        val keys = DeviceProfileService.epicKeys(wolfensteinAppName, "unknown-catalog")
+        val config = requireNotNull(DeviceProfileService.gameConfig(shippedProfile, keys, base))
+
+        assertEquals("2512", config.str("fexcoreVersion"))
+        assertEquals(turnipT26, config.str("graphicsDriverVersion"))
+        assertEquals("Wrapper", config.str("graphicsDriver"))
+        assertEquals("proton-11.0-1-arm64ec-1", config.str("wineVersion"))
+        assertEquals("INTERMEDIATE", config.str("fexcorePreset"))
+        val driver = KeyValueSet(config.str("graphicsDriverConfig"))
+        assertEquals(turnipT26, driver.get("version"))
+        assertEquals("1", driver.get("adrenotoolsTurnip"))
+        // Steam keys are bare appIds: an Epic name must not match them, nor the reverse.
+        assertNull(DeviceProfileService.gameConfig(shippedProfile, listOf(wolfensteinAppName), base))
+        assertNull(DeviceProfileService.gameConfig(shippedProfile, listOf("EPIC:870780"), base))
+    }
+
+    @Test
+    fun gameKeys_steamContainerIsBareAppId_unknownStoreIsEmpty() {
+        assertEquals(listOf("870780"), DeviceProfileService.gameKeys("STEAM_870780"))
+        assertEquals(listOf("870780"), DeviceProfileService.gameKeys("STEAM_870780(1)"))
+        assertEquals(emptyList<String>(), DeviceProfileService.gameKeys("GOG_1207658924"))
+    }
+
+    private fun fexData(fexcore: String, wine: String = "proton-11.0-1-arm64ec-1") =
+        ContainerData(wineVersion = wine, fexcoreVersion = fexcore)
+
+    @Test
+    fun fexExePathOverride_firesOnlyForAffectedVersionAndPath() {
+        val root = { "A:\\WolfNewOrder_x64.exe" }
+        assertEquals("2512", DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2603"), root))
+        assertEquals("2512", DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2608-0"), root))
+        assertNull(DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2610-gn-4"), root))
+        assertNull(DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2512"), root))
+        assertNull(
+            DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2603")) { "A:\\Game\\WolfNewOrder_x64.exe" },
+        )
+        assertNull(DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2603")) { null })
+        // x86-64 Wine runs Box64, not FEX.
+        assertNull(DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2603", "proton-11.0-1-x86_64"), root))
+        // No rule in the profile: nothing changes.
+        assertNull(DeviceProfileService.fexExePathOverride(shippedProfile.copy(rules = emptyMap()), fexData("2603"), root))
+    }
+
+    @Test
+    fun fexExePathOverride_resolvesPathOnlyForAffectedVersion() {
+        var resolved = 0
+        DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2610-gn-4")) { resolved++; "A:\\X.exe" }
+        assertEquals(0, resolved)
+    }
+
+    @Test
+    fun applyRules_customGameAtDriveRootGetsFex2512() {
+        ShadowBuild.setModel("OPD2514")
+        assertNotNull(DeviceProfileService.load(context) { true })
+
+        val atRoot = ContainerData(
+            wineVersion = "proton-11.0-1-arm64ec-1",
+            fexcoreVersion = "2605",
+            executablePath = "WolfNewOrder_x64.exe",
+        )
+        assertEquals("2512", DeviceProfileService.applyRules(context, atRoot, "CUSTOM_GAME_42").fexcoreVersion)
+
+        // `A:\Game\` is 8 bytes: the file name starts past the overwritten prefix.
+        val inFolder = atRoot.copy(executablePath = "Game/WolfNewOrder_x64.exe")
+        assertSame(inFolder, DeviceProfileService.applyRules(context, inFolder, "CUSTOM_GAME_42"))
+        // Exe path passed separately (container creation keeps it on the container, not in the data).
+        val noExe = atRoot.copy(executablePath = "")
+        assertEquals(
+            "2512",
+            DeviceProfileService.applyRules(context, noExe, "CUSTOM_GAME_42", "WolfNewOrder_x64.exe").fexcoreVersion,
+        )
+        // Steam exes are launched from steamapps/common, not the drive root.
+        assertSame(atRoot, DeviceProfileService.applyRules(context, atRoot, "STEAM_201810"))
+    }
+
+    @Test
+    fun applyRules_noProfile_returnsSameData() {
+        ShadowBuild.setModel("SM-S928B")
+        val data = fexData("2603").copy(executablePath = "WolfNewOrder_x64.exe")
+        assertSame(data, DeviceProfileService.applyRules(context, data, "CUSTOM_GAME_42"))
     }
 
     @Test
@@ -202,7 +301,12 @@ class DeviceProfileServiceTest {
         fun ids(type: String) = manifest.items[type].orEmpty().filter { it.variant == "bionic" }.map { it.id }
         val bundledDxvk = context.resources.getStringArray(app.gamenative.R.array.dxvk_version_entries).toList()
 
-        for (entry in listOf(shippedProfile.defaults) + shippedProfile.games.values) {
+        val bundledFexcore = context.resources.getStringArray(app.gamenative.R.array.fexcore_version_entries).toList()
+
+        for (entry in listOf(shippedProfile.defaults) + shippedProfile.games.values + shippedProfile.rules.values) {
+            entry["fexcoreVersion"]?.jsonPrimitive?.content?.let {
+                assertTrue(it, it in bundledFexcore || it in ids("fexcore"))
+            }
             entry["wineVersion"]?.jsonPrimitive?.content?.let { assertTrue(it, it in ids("proton")) }
             entry["graphicsDriverVersion"]?.jsonPrimitive?.content?.let { assertTrue(it, it in ids("driver")) }
             entry["dxwrapperConfig"]?.jsonPrimitive?.content?.let {
@@ -232,6 +336,25 @@ class DeviceProfileServiceTest {
     }
 
     @Test
+    fun fetchBestConfig_localEpicEntryByProfileKeys() = runBlocking {
+        ShadowBuild.setModel("OPD2514")
+        assertNotNull(DeviceProfileService.load(context) { true })
+
+        val response = BestConfigService.fetchBestConfig(
+            context = context,
+            gameName = "Wolfenstein: The New Order",
+            gpuName = "Adreno (TM) 840",
+            gameStore = "EPIC",
+            localProfileKeys = DeviceProfileService.epicKeys(wolfensteinAppName, "catalog"),
+        )
+
+        assertNotNull(response)
+        assertEquals(BestConfigService.SOURCE_LOCAL, response!!.source)
+        assertEquals("EPIC", response.matchedStore)
+        assertEquals("2512", response.bestConfig.str("fexcoreVersion"))
+    }
+
+    @Test
     fun applyLocalFields_setsScreenPresentModeAndFpsLimiter() {
         val container = Container("STEAM_870780")
         val config = JsonObject(
@@ -255,6 +378,70 @@ class DeviceProfileServiceTest {
         assertEquals("mailbox", updated.rendererPresentMode)
         assertEquals("true", container.getExtra("fpsLimiterEnabled"))
         assertEquals("30", container.getExtra("fpsLimiterTarget"))
+    }
+
+    @Test
+    fun shippedProfile_pinsX11ForDefaultsAndGameEntries() {
+        assertEquals(Container.DISPLAY_SERVER_X11, DeviceProfileService.deviceConfig(shippedProfile, base).str("displayServer"))
+        val control = requireNotNull(DeviceProfileService.gameConfig(shippedProfile, 870780, base))
+        assertEquals(Container.DISPLAY_SERVER_X11, control.str("displayServer"))
+    }
+
+    @Test
+    fun applyDeviceDefaults_replacesGamescopeWithX11() {
+        ShadowBuild.setModel("OPD2514")
+        assertNotNull(DeviceProfileService.load(context) { true })
+        val container = Container("STEAM_220")
+        val data = ContainerData(containerVariant = Container.BIONIC, displayServer = Container.DISPLAY_SERVER_GAMESCOPE)
+
+        val updated = DeviceProfileService.applyDeviceDefaults(context, container, data, "STEAM_220", userSavedDefaults = false)
+
+        assertEquals(Container.DISPLAY_SERVER_X11, updated.displayServer)
+        assertEquals("1920x1080", updated.screenSize)
+    }
+
+    @Test
+    fun applyDeviceDefaults_userSavedDefaults_keepDisplayServer() {
+        ShadowBuild.setModel("OPD2514")
+        assertNotNull(DeviceProfileService.load(context) { true })
+        val data = ContainerData(containerVariant = Container.BIONIC, displayServer = Container.DISPLAY_SERVER_GAMESCOPE)
+        assertSame(
+            data,
+            DeviceProfileService.applyDeviceDefaults(context, Container("STEAM_220"), data, "STEAM_220", userSavedDefaults = true),
+        )
+    }
+
+    @Test
+    fun applyLocalFields_gameEntryOverridesDisplayServer_unknownValueIgnored() {
+        val profile = requireNotNull(
+            DeviceProfileService.parse(
+                """
+                {"model": "OPD2514", "defaults": {"displayServer": "x11"},
+                 "games": {"220": {"displayServer": "Gamescope"}, "400": {"displayServer": "wayland"}}}
+                """.trimIndent(),
+            ),
+        )
+        val x11Data = ContainerData(displayServer = Container.DISPLAY_SERVER_X11)
+
+        val game = requireNotNull(DeviceProfileService.gameConfig(profile, 220, base))
+        val updated = DeviceProfileService.applyLocalFields(
+            Container("STEAM_220"),
+            x11Data,
+            game,
+            DeviceProfileService.SOURCE_GAME,
+            "STEAM_220",
+        )
+        assertEquals(Container.DISPLAY_SERVER_GAMESCOPE, updated.displayServer)
+
+        val unknown = requireNotNull(DeviceProfileService.gameConfig(profile, 400, base))
+        val kept = DeviceProfileService.applyLocalFields(
+            Container("STEAM_400"),
+            x11Data,
+            unknown,
+            DeviceProfileService.SOURCE_GAME,
+            "STEAM_400",
+        )
+        assertEquals(Container.DISPLAY_SERVER_X11, kept.displayServer)
     }
 
     @Test

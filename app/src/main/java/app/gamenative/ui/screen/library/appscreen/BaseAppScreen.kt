@@ -958,6 +958,7 @@ abstract class BaseAppScreen {
                 gpuName = gpuName,
                 gameStore = libraryItem.gameSource.name,
                 steamAppId = if (libraryItem.gameSource == GameSource.STEAM) gameId else null,
+                localProfileKeys = DeviceProfileService.gameKeys(libraryItem.appId),
             )
             if (bestConfig == null) {
                 SnackbarManager.show(context.getString(R.string.best_config_fetch_failed))
@@ -1006,10 +1007,14 @@ abstract class BaseAppScreen {
                             if (!forced.isNullOrEmpty()) {
                                 val c = ContainerUtils.getOrCreateContainer(context, appId)
                                 val cd = ContainerUtils.toContainerData(c)
-                                val updated = DeviceProfileService.applyLocalFields(
-                                    c,
-                                    ContainerUtils.applyBestConfigMapToContainerData(cd, forced),
-                                    bestConfig,
+                                val updated = DeviceProfileService.applyRules(
+                                    context,
+                                    DeviceProfileService.applyLocalFields(
+                                        c,
+                                        ContainerUtils.applyBestConfigMapToContainerData(cd, forced),
+                                        bestConfig,
+                                        appId,
+                                    ),
                                     appId,
                                 )
                                 ContainerUtils.applyToContainer(context, c, updated)
@@ -1026,10 +1031,14 @@ abstract class BaseAppScreen {
             } else if (parsedConfig.isNotEmpty()) {
                 val container = ContainerUtils.getOrCreateContainer(context, appId)
                 val currentData = ContainerUtils.toContainerData(container)
-                val updatedData = DeviceProfileService.applyLocalFields(
-                    container,
-                    ContainerUtils.applyBestConfigMapToContainerData(currentData, parsedConfig),
-                    bestConfig,
+                val updatedData = DeviceProfileService.applyRules(
+                    context,
+                    DeviceProfileService.applyLocalFields(
+                        container,
+                        ContainerUtils.applyBestConfigMapToContainerData(currentData, parsedConfig),
+                        bestConfig,
+                        appId,
+                    ),
                     appId,
                 )
                 ContainerUtils.applyToContainer(context, container, updatedData)

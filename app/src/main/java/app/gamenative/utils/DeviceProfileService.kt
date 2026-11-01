@@ -5,6 +5,7 @@ import android.os.Build
 import androidx.annotation.VisibleForTesting
 import app.gamenative.PrefManager
 import app.gamenative.data.GameSource
+import app.gamenative.service.epic.EpicService
 import com.winlator.container.Container
 import com.winlator.container.ContainerData
 import com.winlator.core.GPUInformation
@@ -29,8 +30,11 @@ import timber.log.Timber
  * Priority: explicit user choice > local game entry > local device defaults > server best-config.
  * Profile fields use the server best-config names so [BestConfigService.parseConfigResult] validates and
  * applies them. `graphicsDriverConfig`, `dxwrapperConfig` and `envVars` list only the keys to change and
- * are merged onto the base values. `screenSize`, `rendererPresentMode` and the fps limiter fields are not
- * part of the server path and are applied by [applyLocalFields].
+ * are merged onto the base values. `screenSize`, `displayServer`, `rendererPresentMode` and the fps limiter
+ * fields are not part of the server path and are applied by [applyLocalFields].
+ *
+ * `games` keys: a Steam appId (`"870780"`) or `"EPIC:<appName or catalogId>"` (see [gameKeys]). `rules`
+ * holds device-level fixes evaluated on the final container data, see [applyRules].
  */
 object DeviceProfileService {
     private const val TAG = "DeviceProfile"
@@ -39,11 +43,22 @@ object DeviceProfileService {
     const val SOURCE_DEVICE = "device"
     const val SOURCE_GAME = "game"
 
+    /** Prefix of `games` keys for Epic titles; GameNative's `EPIC_<n>` container id is a local row id. */
+    const val EPIC_KEY_PREFIX = "EPIC:"
+
+    /** Rule: swap FEXCore versions hit by [FexExePathRule] for the version given in the rule. */
+    const val RULE_FEX_EXE_PATH = "fexExePath"
+    private const val KEY_FEXCORE_VERSION = "fexcoreVersion"
+
     private const val KEY_GRAPHICS_DRIVER_CONFIG = "graphicsDriverConfig"
     private const val KEY_DXWRAPPER_CONFIG = "dxwrapperConfig"
     private const val KEY_ENV_VARS = "envVars"
     private const val KEY_SCREEN_SIZE = "screenSize"
     private const val KEY_RENDERER_PRESENT_MODE = "rendererPresentMode"
+
+    // Pad 4 pins X11: the gamescope path swaps the Vulkan ICD for gn-vkshim, bypassing the Wrapper driver.
+    private const val KEY_DISPLAY_SERVER = "displayServer"
+    private val DISPLAY_SERVERS = setOf(Container.DISPLAY_SERVER_X11, Container.DISPLAY_SERVER_GAMESCOPE)
 
     // Container extras read by XServerScreen (FPS_LIMITER_ENABLED_EXTRA / FPS_LIMITER_TARGET_EXTRA).
     private const val KEY_FPS_LIMITER_ENABLED = "fpsLimiterEnabled"
@@ -54,6 +69,7 @@ object DeviceProfileService {
         val gpu: String,
         val defaults: JsonObject,
         val games: Map<String, JsonObject>,
+        val rules: Map<String, JsonObject> = emptyMap(),
     )
 
     /** Values the profile's partial config strings are merged onto. */
@@ -103,6 +119,7 @@ object DeviceProfileService {
                     gpu = root["gpu"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                     defaults = defaults,
                     games = root["games"]?.jsonObject?.mapValues { it.value.jsonObject }.orEmpty(),
+                    rules = root["rules"]?.jsonObject?.mapValues { it.value.jsonObject }.orEmpty(),
                 )
             }
         } catch (e: Exception) {
@@ -124,9 +141,33 @@ object DeviceProfileService {
         mergeLayers(listOf(profile.defaults), base)
 
     /** Device defaults with the game entry on top, or null when the profile has no entry for [steamAppId]. */
-    internal fun gameConfig(profile: DeviceProfile, steamAppId: Int, base: BaseValues): JsonObject? {
-        val game = profile.games[steamAppId.toString()] ?: return null
+    internal fun gameConfig(profile: DeviceProfile, steamAppId: Int, base: BaseValues): JsonObject? =
+        gameConfig(profile, listOf(steamAppId.toString()), base)
+
+    /** Device defaults with the first game entry found under [keys] on top, or null when there is none. */
+    internal fun gameConfig(profile: DeviceProfile, keys: List<String>, base: BaseValues): JsonObject? {
+        val game = keys.firstNotNullOfOrNull { profile.games[it] } ?: return null
         return mergeLayers(listOf(profile.defaults, game), base)
+    }
+
+    /** `games` keys for an Epic title: app name first, then catalog id. */
+    internal fun epicKeys(appName: String, catalogId: String): List<String> =
+        listOf(appName, catalogId).filter { it.isNotBlank() }.distinct().map { EPIC_KEY_PREFIX + it }
+
+    /**
+     * `games` keys for a container id (`STEAM_870780`, `EPIC_82`); empty for stores the profile does not key.
+     * Epic container ids hold a local database row id, so the stable app name and catalog id are looked up.
+     */
+    fun gameKeys(containerId: String): List<String> = try {
+        val gameId = ContainerUtils.extractGameIdFromContainerId(containerId)
+        when (ContainerUtils.extractGameSourceFromContainerId(containerId)) {
+            GameSource.STEAM -> listOf(gameId.toString())
+            GameSource.EPIC -> EpicService.getEpicGameOf(gameId)?.let { epicKeys(it.appName, it.catalogId) }.orEmpty()
+            else -> emptyList()
+        }
+    } catch (e: Exception) {
+        Timber.tag(TAG).w(e, "No profile game keys for $containerId")
+        emptyList()
     }
 
     internal fun mergeLayers(layers: List<JsonObject>, base: BaseValues): JsonObject {
@@ -166,30 +207,101 @@ object DeviceProfileService {
         return entries.values.joinToString(sep)
     }
 
-    /** Local game entry for [steamAppId] as a best-config response, or null when the profile has none. */
-    fun localBestConfig(context: Context, steamAppId: Int, gpuName: String): BestConfigService.BestConfigResponse? {
+    /** Local game entry under [keys] as a best-config response, or null when the profile has none. */
+    fun localBestConfig(
+        context: Context,
+        keys: List<String>,
+        gpuName: String,
+        gameStore: String,
+    ): BestConfigService.BestConfigResponse? {
+        if (keys.isEmpty()) return null
         val profile = load(context) ?: return null
         val base = BaseValues(PrefManager.graphicsDriverConfig, PrefManager.dxWrapperConfig, PrefManager.envVars)
-        val config = gameConfig(profile, steamAppId, base) ?: return null
-        return toBestConfigResponse(config, gpuName)
+        val config = gameConfig(profile, keys, base) ?: return null
+        return toBestConfigResponse(config, gpuName, gameStore)
     }
 
-    internal fun toBestConfigResponse(config: JsonObject, gpuName: String) = BestConfigService.BestConfigResponse(
-        bestConfig = config,
-        matchType = "exact_gpu_match",
-        matchedGpu = gpuName,
-        matchedDeviceId = 0,
-        matchedStore = GameSource.STEAM.name,
-        source = BestConfigService.SOURCE_LOCAL,
-    )
+    // matchedStore = the game's store, so executablePath in the entry survives filterConfigByMatchType.
+    internal fun toBestConfigResponse(config: JsonObject, gpuName: String, gameStore: String = GameSource.STEAM.name) =
+        BestConfigService.BestConfigResponse(
+            bestConfig = config,
+            matchType = "exact_gpu_match",
+            matchedGpu = gpuName,
+            matchedDeviceId = 0,
+            matchedStore = gameStore,
+            source = BestConfigService.SOURCE_LOCAL,
+        )
+
+    /**
+     * Version to use instead of [ContainerData.fexcoreVersion] under [RULE_FEX_EXE_PATH], or null when the rule
+     * is off or does not fire. [launchPath] is resolved only when the version is affected. arm64ec Wine runs 64-bit
+     * guests through FEX regardless of the WoW64 emulator setting, so only the Wine build is checked.
+     */
+    internal fun fexExePathOverride(profile: DeviceProfile, data: ContainerData, launchPath: () -> String?): String? {
+        val fallback = profile.rules[RULE_FEX_EXE_PATH]?.string(KEY_FEXCORE_VERSION) ?: return null
+        if (!data.wineVersion.contains("arm64ec", ignoreCase = true)) return null
+        if (!FexExePathRule.isAffectedVersion(data.fexcoreVersion)) return null
+        val path = launchPath() ?: return null
+        return fallback.takeIf { FexExePathRule.isAffectedPath(path) }
+    }
+
+    /**
+     * Applies the profile `rules` to [containerData]. Called only where GameNative itself picks the config
+     * (new container, "Use known config"), never at launch, so a version the user set later stays.
+     */
+    fun applyRules(
+        context: Context,
+        containerData: ContainerData,
+        appId: String,
+        executablePath: String = containerData.executablePath,
+    ): ContainerData {
+        val profile = load(context) ?: return containerData
+        var launchPath: String? = null
+        val fexcore = fexExePathOverride(profile, containerData) {
+            launchedExePath(appId, executablePath).also { launchPath = it }
+        } ?: return containerData
+        Timber.tag(TAG).i(
+            "Applied rule=$RULE_FEX_EXE_PATH appId=$appId exe=$launchPath" +
+                " fexcore=${containerData.fexcoreVersion}->$fexcore",
+        )
+        return containerData.copy(fexcoreVersion = fexcore)
+    }
+
+    /**
+     * Windows path the game exe is launched with, mirroring the Epic and custom-game branches of
+     * `XServerScreen.getWineStartCommand`; null for other stores (their exe is not at `A:\`) or when unknown.
+     */
+    private fun launchedExePath(appId: String, executablePath: String): String? = try {
+        when (ContainerUtils.extractGameSourceFromContainerId(appId)) {
+            GameSource.EPIC -> {
+                val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
+                val game = EpicService.getEpicGameOf(gameId)?.takeIf { it.isInstalled && it.installPath.isNotEmpty() }
+                val exe = executablePath.ifEmpty {
+                    runBlocking(Dispatchers.IO) { EpicService.getInstance()?.epicManager?.getInstalledExe(gameId) }.orEmpty()
+                }
+                if (game == null || exe.isEmpty()) null else FexExePathRule.gameDrivePath(exe, game.installPath)
+            }
+            GameSource.CUSTOM_GAME -> executablePath.takeIf { it.isNotEmpty() }?.let { FexExePathRule.gameDrivePath(it) }
+            else -> null
+        }
+    } catch (e: Exception) {
+        Timber.tag(TAG).w(e, "Launch path unknown for $appId")
+        null
+    }
 
     /**
      * Applies device defaults over [containerData] (which may already hold a server config). Skipped when
      * the user saved default container settings: that is an explicit choice.
      */
-    fun applyDeviceDefaults(context: Context, container: Container, containerData: ContainerData, appId: String): ContainerData {
+    fun applyDeviceDefaults(
+        context: Context,
+        container: Container,
+        containerData: ContainerData,
+        appId: String,
+        userSavedDefaults: Boolean = PrefManager.hasSavedContainerDefaults,
+    ): ContainerData {
         val profile = load(context) ?: return containerData
-        if (PrefManager.hasSavedContainerDefaults) {
+        if (userSavedDefaults) {
             Timber.tag(TAG).i("Local profile skipped source=$SOURCE_DEVICE appId=$appId: user saved default settings")
             return containerData
         }
@@ -214,8 +326,8 @@ object DeviceProfileService {
     }
 
     /**
-     * Applies the profile fields the server path does not carry: screen size and renderer present mode go
-     * into the returned data, the fps limiter into [container] extras. Logs the applied source.
+     * Applies the profile fields the server path does not carry: screen size, display server and renderer
+     * present mode go into the returned data, the fps limiter into [container] extras. Logs the applied source.
      */
     fun applyLocalFields(
         container: Container,
@@ -226,6 +338,14 @@ object DeviceProfileService {
     ): ContainerData {
         var updated = containerData
         config.string(KEY_SCREEN_SIZE)?.let { updated = updated.copy(screenSize = it) }
+        config.string(KEY_DISPLAY_SERVER)?.let { value ->
+            val displayServer = value.lowercase()
+            if (displayServer in DISPLAY_SERVERS) {
+                updated = updated.copy(displayServer = displayServer)
+            } else {
+                Timber.tag(TAG).w("Ignored unknown displayServer=$value source=$source appId=$appId")
+            }
+        }
         config.string(KEY_RENDERER_PRESENT_MODE)?.let { updated = updated.copy(rendererPresentMode = it) }
         (config[KEY_FPS_LIMITER_ENABLED] as? JsonPrimitive)?.booleanOrNull?.let {
             container.putExtra(KEY_FPS_LIMITER_ENABLED, it)
@@ -233,7 +353,10 @@ object DeviceProfileService {
         (config[KEY_FPS_LIMITER_TARGET] as? JsonPrimitive)?.intOrNull?.takeIf { it > 0 }?.let {
             container.putExtra(KEY_FPS_LIMITER_TARGET, it)
         }
-        Timber.tag(TAG).i("Applied local profile source=$source appId=$appId model=${Build.MODEL}")
+        Timber.tag(TAG).i(
+            "Applied local profile source=$source appId=$appId model=${Build.MODEL}" +
+                " displayServer=${updated.displayServer}",
+        )
         return updated
     }
 
