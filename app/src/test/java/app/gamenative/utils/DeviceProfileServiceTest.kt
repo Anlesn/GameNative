@@ -134,7 +134,10 @@ class DeviceProfileServiceTest {
     @Test
     fun fexExePathOverride_resolvesPathOnlyForAffectedVersion() {
         var resolved = 0
-        DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2610-gn-4")) { resolved++; "A:\\X.exe" }
+        DeviceProfileService.fexExePathOverride(shippedProfile, fexData("2610-gn-4")) {
+            resolved++
+            "A:\\X.exe"
+        }
         assertEquals(0, resolved)
     }
 
