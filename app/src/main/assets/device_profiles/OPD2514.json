@@ -20,6 +20,7 @@
   },
   "games": {
     "220": {
+      "executablePath": "hl2.exe",
       "fpsLimiterEnabled": true,
       "fpsLimiterTarget": 60
     },

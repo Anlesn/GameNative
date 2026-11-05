@@ -251,6 +251,8 @@ class DeviceProfileServiceTest {
     fun gameConfig_halfLife2CapsAt60() {
         val config = requireNotNull(DeviceProfileService.gameConfig(shippedProfile, 220, base))
 
+        // A game entry replaces the server config, so it must name the exe (HL2 ships SDK tools in bin/).
+        assertEquals("hl2.exe", config.str("executablePath"))
         assertEquals("true", config.str("fpsLimiterEnabled"))
         assertEquals("60", config.str("fpsLimiterTarget"))
         assertEquals("x11", config.str("displayServer"))
