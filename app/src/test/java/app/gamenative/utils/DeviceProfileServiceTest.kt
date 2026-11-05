@@ -244,6 +244,16 @@ class DeviceProfileServiceTest {
     }
 
     @Test
+    fun gameConfig_halfLife2CapsAt60() {
+        val config = requireNotNull(DeviceProfileService.gameConfig(shippedProfile, 220, base))
+
+        assertEquals("true", config.str("fpsLimiterEnabled"))
+        assertEquals("60", config.str("fpsLimiterTarget"))
+        assertEquals("x11", config.str("displayServer"))
+    }
+
+
+    @Test
     fun gameConfig_emptyEntryEqualsDeviceDefaults_unknownAppIsNull() {
         assertEquals(
             DeviceProfileService.deviceConfig(shippedProfile, base),

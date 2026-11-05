@@ -18,6 +18,10 @@
     "fpsLimiterEnabled": false
   },
   "games": {
+    "220": {
+      "fpsLimiterEnabled": true,
+      "fpsLimiterTarget": 60
+    },
     "1313140": {},
     "870780": {
       "executablePath": "Control_DX11.exe",
