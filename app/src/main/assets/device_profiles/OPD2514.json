@@ -26,9 +26,9 @@
     "1313140": {},
     "870780": {
       "executablePath": "Control_DX11.exe",
-      "graphicsDriverVersion": "Turnip Adreno Driver T26 (@Mr_Purple_666)",
-      "graphicsDriverConfig": "version=Turnip Adreno Driver T26 (@Mr_Purple_666)",
-      "dxwrapperConfig": "version=2.4.1",
+      "graphicsDriverVersion": "Turnip Adreno Driver T30 (@Mr_Purple_666)",
+      "graphicsDriverConfig": "version=Turnip Adreno Driver T30 (@Mr_Purple_666)",
+      "dxwrapperConfig": "version=2.4.1-gplasync",
       "fexcorePreset": "COMPATIBILITY",
       "envVars": "DXVK_CONFIG=dxvk.enableGraphicsPipelineLibrary=False",
       "rendererPresentMode": "mailbox",
