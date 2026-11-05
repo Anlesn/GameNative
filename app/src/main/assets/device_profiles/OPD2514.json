@@ -10,6 +10,7 @@
     "dxwrapper": "dxvk",
     "dxwrapperConfig": "version=1.11.1-sarek",
     "emulator": "FEXCore",
+    "fexcoreVersion": "2512",
     "fexcorePreset": "INTERMEDIATE",
     "envVars": "WRAPPER_USE_BCN_CACHE=1",
     "screenSize": "1920x1080",
@@ -18,6 +19,10 @@
     "fpsLimiterEnabled": false
   },
   "games": {
+    "220": {
+      "fpsLimiterEnabled": true,
+      "fpsLimiterTarget": 60
+    },
     "1313140": {},
     "870780": {
       "executablePath": "Control_DX11.exe",

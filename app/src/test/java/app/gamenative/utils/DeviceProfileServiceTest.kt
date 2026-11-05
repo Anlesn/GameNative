@@ -3,6 +3,7 @@ package app.gamenative.utils
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import app.gamenative.PrefManager
+import app.gamenative.R
 import com.winlator.container.Container
 import com.winlator.container.ContainerData
 import com.winlator.core.KeyValueSet
@@ -244,6 +245,23 @@ class DeviceProfileServiceTest {
         val env = EnvVars(config.str("envVars"))
         assertEquals("1", env.get("WRAPPER_USE_BCN_CACHE"))
         assertEquals("dxvk.enableGraphicsPipelineLibrary=False", env.get("DXVK_CONFIG"))
+    }
+
+    @Test
+    fun gameConfig_halfLife2CapsAt60() {
+        val config = requireNotNull(DeviceProfileService.gameConfig(shippedProfile, 220, base))
+
+        assertEquals("true", config.str("fpsLimiterEnabled"))
+        assertEquals("60", config.str("fpsLimiterTarget"))
+        assertEquals("x11", config.str("displayServer"))
+    }
+
+    @Test
+    fun deviceDefaults_pinBundledFexcore() {
+        // DefaultVersion.FEXCORE (2610-gn-4) is download-only; an upgraded install may never have fetched it.
+        val config = DeviceProfileService.deviceConfig(shippedProfile, base)
+        assertEquals("2512", config.str("fexcoreVersion"))
+        assertTrue("2512" in context.resources.getStringArray(R.array.fexcore_version_entries))
     }
 
     @Test
