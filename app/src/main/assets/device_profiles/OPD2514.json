@@ -10,6 +10,7 @@
     "dxwrapper": "dxvk",
     "dxwrapperConfig": "version=1.11.1-sarek",
     "emulator": "FEXCore",
+    "fexcoreVersion": "2512",
     "fexcorePreset": "INTERMEDIATE",
     "envVars": "WRAPPER_USE_BCN_CACHE=1",
     "screenSize": "1920x1080",
