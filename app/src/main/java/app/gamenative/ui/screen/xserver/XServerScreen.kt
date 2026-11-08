@@ -115,6 +115,7 @@ import java.util.EnumSet
 import app.gamenative.externaldisplay.ExternalDisplayInputController
 import app.gamenative.externaldisplay.ExternalDisplaySwapController
 import app.gamenative.externaldisplay.SwapInputOverlayView
+import app.gamenative.powercontrol.GameModeState
 import app.gamenative.powercontrol.PowerManager
 import app.gamenative.service.AchievementWatcher
 import app.gamenative.service.SteamHostAchievementPoller
@@ -2363,6 +2364,7 @@ fun XServerScreen(
                             if (!xServerState.value.winStarted && window.isApplicationWindow()) {
                                 if (shouldShowMouseCursor()) renderer?.setCursorVisible(true)
                                 xServerState.value.winStarted = true
+                                GameModeState.report(context, GameModeState.Phase.GAMEPLAY, "first frame of ${window.className}")
                             }
                             if (!getxServer().isFlatPresentationEnabled) return
                             if (window.isApplicationWindow()) {
@@ -4358,6 +4360,7 @@ private fun setupXEnvironment(
 ): XEnvironment {
     val session = guestSession.incrementAndGet()
     val isX11Display = sessionDisplay == SessionDisplay.X11
+    GameModeState.report(context, GameModeState.Phase.LOADING, "wine environment setup")
     ProcessHelper.hardKillStaleWineProcesses()
 
     val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
